@@ -1,0 +1,46 @@
+{
+  "name": "dsh-mcp-manager-panel",
+  "version": "0.3.3",
+  "description": "DSH MCP 服务管理面板（自足版）：设置页粘贴 mcpServers JSON 一键导入，厂商分组卡片视图，组级/单条档位管理，并自带 MCP 连接/工具注册/调用（stdio + streamable-http），无需能力库插件。v0.3.3：组头圆点按连接状态着色（仅已连接才绿）+ 组头自定义名称（groups.json 持久化）。",
+  "type": "module",
+  "main": "lib/index.js",
+  "exports": {
+    ".": "./lib/index.js",
+    "./client": "./client/client.js",
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "lib/index.js",
+    "client/client.js",
+    "cordis.patch.yml",
+    "README.md",
+    "AGENTS.md"
+  ],
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.12.0"
+  },
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "inject": [
+        "slots"
+      ],
+      "platform": "web"
+    }
+  },
+  "peerDependencies": {
+    "@deepseek-ai/cordis": "^4.0.1",
+    "react": "^18.2.0"
+  },
+  "license": "MIT",
+  "keywords": [
+    "dsh",
+    "dsh-plugin",
+    "deepseek-harness",
+    "mcp",
+    "mcp-servers",
+    "cordis"
+  ]
+}

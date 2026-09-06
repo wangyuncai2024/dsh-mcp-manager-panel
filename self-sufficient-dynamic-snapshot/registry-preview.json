@@ -1,0 +1,324 @@
+{
+  "version": 1,
+  "entries": [
+    {
+      "id": "pkulaw-law-search",
+      "name": "pkulaw-law-search",
+      "tier": "on-demand",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/mcp-law-search-service",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-law-search",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:30.026Z",
+      "lastSyncAt": "2026-09-04T13:20:35.639Z",
+      "tools": [
+        {
+          "name": "get_article",
+          "description": "根据法规标题和条号获取法条内容。"
+        },
+        {
+          "name": "search_article",
+          "description": "根据关键词或文本进行语义检索，返回符合条件的法条。支持根据法规库、时效性、制定机关、施行日期等条件对法规进行筛选过滤。"
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "2.13.1",
+      "serverTitle": "pkulaw-law-search",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-law-keyword",
+      "name": "pkulaw-law-keyword",
+      "tier": "eager",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/mcp-law",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-law-keyword",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:40.049Z",
+      "lastSyncAt": "2026-09-04T13:20:40.049Z",
+      "tools": [
+        {
+          "name": "get_law_list",
+          "description": "\n        查询法规列表接口，返回前20条。    \n        如标题为刑法并且正文关键词为盗窃    \n        "
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "1.14.1",
+      "serverTitle": "api_pkulaw_streamable_lawmcp",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-case-semantic-search",
+      "name": "pkulaw-case-semantic-search",
+      "tier": "eager",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/mcp-case-search-service",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-case-semantic-search",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:26.523Z",
+      "lastSyncAt": "2026-09-04T13:20:39.010Z",
+      "tools": [
+        {
+          "name": "search_case",
+          "description": "智能检索司法案例，可以输入关键词或文本进行语义搜索。"
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "2.13.1",
+      "serverTitle": "pkulaw-case-search",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-case-keyword",
+      "name": "pkulaw-case-keyword",
+      "tier": "eager",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/mcp-case",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-case-keyword",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:25.431Z",
+      "lastSyncAt": "2026-09-04T13:20:38.906Z",
+      "tools": [
+        {
+          "name": "get_case_list",
+          "description": "\n        查询案例列表接口，返回前20条。    \n        如标题为纠纷案并且正文关键词为合同纠纷\n        "
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "1.14.1",
+      "serverTitle": "api_pkulaw_streamable_casemcp",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-law-item-keyword",
+      "name": "pkulaw-law-item-keyword",
+      "tier": "eager",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/mcp-fatiao",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-law-item-keyword",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:28.091Z",
+      "lastSyncAt": "2026-09-04T13:20:39.170Z",
+      "tools": [
+        {
+          "name": "get_law_item_content",
+          "description": "\n        查询法规中某一个法条的内容，如刑法第2条\n        \n        "
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "1.14.1",
+      "serverTitle": "api_pkulaw_streamable_fatiaomcp",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-law-recognition",
+      "name": "pkulaw-law-recognition",
+      "tier": "on-demand",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/law_recognition",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-law-recognition",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:29.325Z",
+      "lastSyncAt": "2026-09-04T13:20:35.584Z",
+      "tools": [
+        {
+          "name": "law_recognition",
+          "description": "semantic search of law article."
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "1.27.2",
+      "serverTitle": "pkulaw-law-recognition",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-case-number-recognition",
+      "name": "pkulaw-case-number-recognition",
+      "tier": "eager",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/case_number_recognition",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-case-number-recognition",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:25.824Z",
+      "lastSyncAt": "2026-09-04T13:20:38.958Z",
+      "tools": [
+        {
+          "name": "anhao_recognition",
+          "description": "案号的自动识别和标准化：首先自动识别法律文本中的案号，然后利用法宝案例库对识别到的案号进行标准化验证并输出标准化结果：识别案号：text，标准案号：caseFlag，案例标题：title，审理法院：court，最终审结日期：lastInstanceDate，链接：url。"
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "2.13.1",
+      "serverTitle": "pkulaw-anhao-recognition",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-citation-validator",
+      "name": "pkulaw-citation-validator",
+      "tier": "eager",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/pku_citation_validator",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-citation-validator",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:27.018Z",
+      "lastSyncAt": "2026-09-04T13:20:39.062Z",
+      "tools": [
+        {
+          "name": "adjust_provisions",
+          "description": "当需要法律条文支撑时调用此工具。对于闲聊、代码编写、地理旅游等与法条无关的问题，请勿调用，直接回答即可。该工具能返回权威的法律法规条文原文及司法解释。请根据返回的检索结果来回答用户问题，严禁仅凭训练数据编造法条。"
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "1.0.0.0",
+      "serverTitle": "chat_web_api",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    },
+    {
+      "id": "pkulaw-doc-link",
+      "name": "pkulaw-doc-link",
+      "tier": "eager",
+      "transport": "streamable-http",
+      "command": null,
+      "args": [],
+      "env": {},
+      "cwd": null,
+      "url": "https://apim-gateway.pkulaw.com/add-doc-link",
+      "headers": {
+        "Authorization": "Bearer 1591335b-a37f-3a33-950c-bf17a348de01"
+      },
+      "notes": "",
+      "systemEntryId": "mcp-pkulaw-doc-link",
+      "managed": true,
+      "registeredAt": "2026-09-04T12:00:07.093Z",
+      "lastLoadAt": "2026-09-04T13:20:27.651Z",
+      "lastSyncAt": "2026-09-04T13:20:39.119Z",
+      "tools": [
+        {
+          "name": "get_linked_content",
+          "description": "为文本内容智能添加法规超链接\n\n自动识别文本中的法规条文，法律概念和相关术语，\n并为其添加对应的法规文档超链接，便于快速查阅和引用。\n\nArgs:\n    message: 需要处理的文本内容，必须是字符串类型\nReturns:\n    str: 添加了法规超链接的文本内容"
+        }
+      ],
+      "disabledTools": [],
+      "serverName": "",
+      "serverVersion": "1.14.1",
+      "serverTitle": "add_doc_link",
+      "serverDescription": "",
+      "websiteUrl": "",
+      "instructions": "",
+      "capabilities": null,
+      "metaFetchedAt": null
+    }
+  ]
+}

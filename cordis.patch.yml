@@ -1,0 +1,9 @@
+# dsh bundle patch: auto-mounts this plugin when installed into a profile
+# (`pnpm add dsh-mcp-manager-panel` / `dsh plugin add`).
+# Optional row config (override the id `mcp-manager-panel` in the profile's
+# cordis.patch.yml with the same id to set config):
+#   dataDir: ''   # 注册表目录；空 = $DSH_HOME/skill-mcp-manager（与能力库共享 registry.json）
+- insert:
+    - id: mcp-manager-panel
+      name: 'dsh-mcp-manager-panel'
+      inject: [tools]
