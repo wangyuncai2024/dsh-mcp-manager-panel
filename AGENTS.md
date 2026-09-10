@@ -2,7 +2,7 @@
 
 给接手继续开发的 AI / 开发者。改代码前先读本文件 + README.md。
 
-## 是什么（v0.2.0 自足版）
+## 是什么（v0.4.0 自足版 · UI 对齐 DSH 设置面板）
 
 DSH 宿主级打包插件的 **MCP 服务管理面板 + MCP 运行时一体**：
 - **Host**：`lib/index.js`（ESM）。读写权威注册表 `<dataDir>/registry.json`，用
@@ -40,6 +40,19 @@ DSH 宿主级打包插件的 **MCP 服务管理面板 + MCP 运行时一体**：
 - 纯 JavaScript。宿主 ESM 只 import node 内置模块 + `@modelcontextprotocol/sdk`。
 - 客户端 `React.createElement`（可 `const h = React.createElement`），样式塞进带 `data-plugin-css`
   的 `<style>`（幂等注入），颜色用产品主题变量 `--dsw-alias-*`（明暗主题自适应）。
+- **客户端 UI 先复用产品原子件**：平台 seed 模块 `@deepseek-ai/dsh-client-ui-primitives`
+  （`require("@deepseek-ai/dsh-client-ui-primitives")`，web 壳自带、无需声明依赖）提供
+  `Button` / `Pill` / `Tag` / `StateDot` / `Input` / `Menu` / `Modal` / `Toast` / 图标集 / `writeClipboard`。
+  自造控件前先看 `packages/client/ui-primitives/README.md` 的组件目录；视觉差异优先做成局部 class 而不是复制控件。
+  原子件缺失时客户端退化为文件内置的 `FALLBACK`（冒烟测试会同时跑两条路径）。
+- **版式照 `docs/web-styling.md`**：设置页 = `max-width 760` + 12px 列间距、`h2 18/600` + 13px 三级色导语；
+  中性描边统一 `0.5px`；全圆角配 `corner-shape: round`；不要写组件级 `::-webkit-scrollbar`
+  （主题 `scrollbar.css` 已全局接管，弹层/菜单由原子件自己做 elevation 重绑）；保留 `:focus-visible` 与
+  `prefers-reduced-motion`；不写死颜色。
+- **参考实现**：`packages/client/ui-settings-plugins`（设置页骨架/标签页）与
+  `packages/client/ui-settings-plugin-inventory`（搜索框 + 分组卡 + 展开详情 + StateDot/Tag 用法）
+  是本面板对齐的样板，改版式前先读它们。
+- 成功提示走 `Toast`，失败用可关闭的行内告警（`role="alert"`）；破坏性操作用 `Modal` 二次确认。
 - 错误处理：handler 内 throw → 路由层统一 `400 {ok:false, error}`；成功一律 `200 {ok:true, …}`；
   客户端 `postJson` 把 `!res.ok || data.ok===false` 转成抛错。
 
@@ -50,14 +63,20 @@ node --check lib/index.js
 node --check client/client.js
 ```
 
-客户端渲染冒烟测试（开发用，不进包）：在临时目录装 react/react-dom@18 后跑
-`client/render-smoke.mjs`（SSR 渲染整个组件树 + 校验纯函数，React key 警告计为失败）：
+客户端渲染冒烟测试（开发用，不进包）：`client/render-smoke.mjs` 用 React 18 SSR 渲染整棵组件树 +
+校验纯函数 + 断言结构/文案，React key 警告计为失败。react / react-dom 从**当前工作目录**解析
+（找不到再退回本包目录），所以按老流程在临时目录装 react 再跑即可；本机也可以直接用 DSH 检出里的
+react/react-dom（软链进临时目录的 node_modules）：
 
 ```bash
-mkdir -p /tmp/mpm-smoke && cd /tmp/mpm-smoke
-npm i react@18.3.1 react-dom@18.3.1
+mkdir -p /tmp/mpm-smoke/node_modules && cd /tmp/mpm-smoke
+npm i react@18.3.1 react-dom@18.3.1        # 或软链一份现成的 react/react-dom@18.3.1
 node <本包路径>/client/render-smoke.mjs
 ```
+
+测试会跑两条路径：① `client/primitives-stub.mjs` 替身（模拟平台 seed 的 ui-primitives），
+② 不提供原子件（走内置退化实现）；并交叉校验客户端读到的每个原子名都由 `ui-primitives` 真实导出
+（环境变量 `DSH_CHECKOUT` 指定检出路径，默认 `/home/wangyuncai/deepseek-harness`，找不到则跳过）。
 
 本地安装到 profile 测试（file: 依赖要 remove+add 才刷新）：
 
@@ -72,6 +91,12 @@ pnpm add "file:<本包绝对路径>"
 验证点：页面能列出注册表条目（组/单条正确分组）；粘贴一段 mcpServers JSON 导入后 registry.json 出现对齐字段的条目；
 整组档位切换批量写盘；连接某条目后状态变"已连接 · N 工具"，且**新会话**能直接调用 `mcp__<名称>__*` 工具
 （运行中会话从新 step 起可见）；断开后工具从新会话工具集消失；重启 DSH 后 eager 项自动重连。
+
+UI 验证点（v0.4.0 起）：顶栏三个按钮与搜索框在同一行且不换行错位；分组卡的 `⋯` 菜单 portal 到 body（不被裁剪）；
+导入弹层的 textarea 自动聚焦、粘贴后"一键导入"给出逐条新增/更新/失败结果；删除走弹层确认；
+成功提示出现在窗口顶部居中并自动淡出；明暗两种主题下颜色都取自 `--dsw-alias-*`（不出现写死颜色）。
+客户端是普通 fetch bundle，改完 `client/client.js` 后**刷新页面**即可生效（client-plugin 热更新仅在
+`pnpm run dev:web` 同时运行时免刷新）。
 
 ## 与本机其它插件的关系
 
@@ -90,4 +115,7 @@ pnpm add "file:<本包绝对路径>"
 - [ ] 组默认档位 + 个别行锁定持久语义（groups.json 元数据）；"一键拉齐"按钮。
 - [ ] 工具级黑名单（单工具禁用，联动 `disabledTools` 字段）。
 - [ ] 自定义分组名（非前缀规则）；组折叠状态持久化（当前为会话内记忆，重启还原为折叠）。
-- [x] 从注册表导出 mcpServers JSON（反向导出，方便换机器）——v0.3.0 顶栏"导出配置"按钮。
+- [ ] 文案未国际化：面板文案硬编码中文，产品设置页走 `ctx.locale`；要对齐需接 locale seat（当前有意不做）。
+- [ ] 弹层与设置面板都监听 document Escape（产品 Modal 的既有行为）：在导入/确认弹层按 Esc 会连设置面板一起关。
+- [x] 从注册表导出 mcpServers JSON（反向导出，方便换机器）——v0.3.0 顶栏"导出"按钮。
+- [x] UI 对齐 DSH 设置面板（复用 ui-primitives + `--dsw-alias-*` + 设置页排版）——v0.4.0。

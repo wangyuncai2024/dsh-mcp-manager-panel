@@ -1,31 +1,151 @@
 window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) => {
 
-  // dsh-mcp-manager-panel — browser client（自足版 v0.3.3，UI 重构版）。
-  // 注册 设置 → MCP 服务 页面：粘贴 mcpServers JSON 一键导入 + 厂商分组管理
-  // + 每行/每组 连接状态与 连接/断开 按钮 + 工具列表展开条 + 配置导出。
+  // dsh-mcp-manager-panel — 浏览器客户端（v0.4.0：对齐 DSH 设置面板）。
+  //
   // 数据经同源 HTTP 路由 /mcp-panel/* 读写宿主；档位/连接即时生效。
   //
-  // UI 特性（v0.3.0）：
-  //  - 顶栏统计（服务数 / 已连接 / 在线工具 / 常驻 / 停用）+ 一键刷新 / 导出 mcpServers JSON
-  //  - 全局搜索（名称 / 端点 / 工具名）与“全部展开 / 收起”
-  //  - 段式档位控件（常驻 / 按需 / 停用），组头一键整组拉齐
-  //  - 状态徽章（已连接 · N 工具 / 连接中 / 失败，失败可展开错误详情）+ 5s 轻量轮询
-  //  - 已连接服务可展开工具列表条，复制 mcp__<名称>__<工具> / 前缀
-  //  - 导入卡可折叠，内置示例 JSON；加载骨架屏 / 空态引导
-  //
-  //  v0.3.1：单成员前缀也渲染为厂商卡片头，与 ≥2 成员组视觉统一。
-  //  v0.3.2：组头控件与多成员组完全同款（全部连接/全部断开/整组档位/展开成员），
-  //    单成员组默认展开、可折叠；组头新增“删除整组”（逐条走宿主 delete 路由）；
-  //    二级（成员行）删除确认改为紧凑堆叠块、末列自适应宽度；三级（工具列表条）
-  //    服务名超长截断、滚动区域改用细滚动条。
-  //  v0.3.3：组头小圆点按组连接状态着色（仅已有成员连接才绿；未连接为灰、
-  //    连接中琥珀闪动、任一条失败为红），不再用前缀色相冒充状态；组头标题支持
-  //    自行改名（宿主 groups.json 元数据 + save setGroupTitle，list 返回 groupMeta；
-  //    保存后组名持久，空名恢复自动名；只影响显示，不影响前缀分组）。
+  // v0.4.0 视觉/交互对齐产品设置面板（docs/web-styling.md 的约定）：
+  //  - 复用平台 seed 模块 @deepseek-ai/dsh-client-ui-primitives 的原子件：
+  //    Button / Pill / Tag / StateDot / Menu / Modal / Toast / Input / 图标；
+  //    不再自造按钮、徽章、下拉、弹层与状态点（原子件缺失时才退化为本地最小实现）。
+  //  - 版式遵循设置页约定：max-width 760 + 12px 列间距、h2 18/600 + 13px 三级色导语、
+  //    0.5px 中性描边卡片（不与 elevation 阴影同时出现）、12/11px 辅助信息、
+  //    数字 tabular-nums、代码用 var(--ds-font-family-code)、只用 --dsw-alias-* 语义 token。
+  //  - 结构：顶栏（搜索 + 刷新/导出/导入）→ 统计行 → 服务分组卡（组头折叠 + ⋯ 溢出菜单）
+  //    → 成员行（状态点 + Tag 状态 + 连接/断开 + 档位 Pill 三连 + 工具 Pill + 删除）
+  //    → 工具详情面板（内嵌 bg-module-platform 面板）。
+  //  - 导入配置改为 Modal + primary 按钮；删除/整组删除改 Modal 二次确认；
+  //    成功提示走顶部 Toast，失败保留可关闭的行内 alert；骨架屏用 bg-skeleton token。
+  //  - 不写自定义滚动条选择器（主题 scrollbar.css 已全局接管，面板内继承 l2 缩略色）。
 
   const React = require("react");
   const h = React.createElement;
   const { useState, useEffect, useCallback, useMemo, useRef } = React;
+
+  // ── 产品 UI 原子（平台 seed 模块；require 失败/缺件时退化为本地最小实现）──
+  function cls() {
+    let out = "";
+    for (let i = 0; i < arguments.length; i++) {
+      const part = arguments[i];
+      if (part) out = out ? out + " " + part : String(part);
+    }
+    return out;
+  }
+
+  function NullIcon() { return null; }
+
+  // 退化实现只保证结构可用，视觉尽量贴产品 token（真机上永远走真原子件）。
+  const FALLBACK = {
+    Button(props) {
+      const { variant = "ghost", size = "md", icon: leading, className, children } = props;
+      const rest = { ...props };
+      delete rest.variant; delete rest.size; delete rest.icon; delete rest.className; delete rest.children;
+      return h("button", { type: "button", ...rest, className: cls("mpm-fb-btn", "mpm-fb-" + variant, "mpm-fb-" + size, className) },
+        leading === undefined || leading === null ? null : h("span", { className: "mpm-fb-icon" }, leading), children);
+    },
+    Pill(props) {
+      const { active, className, children, onClick } = props;
+      const rest = { ...props };
+      delete rest.active; delete rest.className; delete rest.children; delete rest.onClick;
+      const klass = cls("mpm-fb-pill", active ? "on" : "", className);
+      return onClick ? h("button", { type: "button", ...rest, className: klass, onClick }, children) : h("span", { className: klass }, children);
+    },
+    Tag(props) {
+      const { tone = "outline", className, children } = props;
+      return h("span", { className: cls("mpm-fb-tag", className), "data-tone": tone }, children);
+    },
+    StateDot(props) {
+      const { state, size = 10, className } = props;
+      return h("span", { className: cls("mpm-fb-dot", className), "data-state": state, style: { width: size, height: size } });
+    },
+    Input(props) {
+      const { icon: leading, className } = props;
+      const rest = { ...props };
+      delete rest.icon; delete rest.className;
+      return h("span", { className: cls("mpm-fb-input", className) },
+        leading === undefined || leading === null ? null : h("span", { className: "mpm-fb-icon" }, leading),
+        h("input", rest));
+    },
+    Menu(props) {
+      const { open, anchor, items, onSelect, onClose } = props;
+      const rows = [];
+      if (open) {
+        for (const item of items || []) {
+          if (item.type === "separator") { rows.push(h("div", { className: "mpm-fb-menu-sep", key: item.id })); continue; }
+          if (item.type === "label") { rows.push(h("div", { className: "mpm-fb-menu-label", key: item.id }, item.text)); continue; }
+          rows.push(h("button", {
+            type: "button", key: item.id, disabled: item.disabled === true, className: "mpm-fb-menu-item",
+            "data-danger": item.danger === true ? "true" : undefined,
+            onClick: () => { if (!item.disabled) onSelect(item.id); },
+          }, h("span", { className: "mpm-fb-icon", key: "i" }, item.icon || null), h("span", { key: "l" }, item.label)));
+        }
+        rows.push(h("button", { type: "button", key: "__close", className: "mpm-fb-menu-close", onClick: onClose }, "关闭菜单"));
+      }
+      return h("span", { className: "mpm-fb-menu" }, [
+        h("span", { className: "mpm-fb-menu-anchor", key: "a" }, anchor),
+        open ? h("div", { className: "mpm-fb-menu-list", key: "l" }, rows) : null,
+      ]);
+    },
+    Modal(props) {
+      const { open, onClose, title, closeLabel, description, children, footer, className } = props;
+      if (!open) return null;
+      return h("div", { className: cls("mpm-fb-mask", className), role: "presentation" }, [
+        h("div", { className: "mpm-fb-masklayer", key: "m", "aria-hidden": "true", onClick: onClose }),
+        h("div", { className: "mpm-fb-dialog", key: "d", role: "dialog", "aria-modal": "true", "aria-label": title }, [
+          h("div", { className: "mpm-fb-dialog-head", key: "h" }, [
+            h("h2", { key: "t" }, title),
+            h("button", { type: "button", key: "c", "aria-label": closeLabel, onClick: onClose }, "✕"),
+          ]),
+          description ? h("p", { className: "mpm-fb-dialog-desc", key: "p" }, description) : null,
+          children === undefined ? null : h("div", { className: "mpm-fb-dialog-body", key: "b" }, children),
+          footer === undefined ? null : h("div", { className: "mpm-fb-dialog-foot", key: "f" }, footer),
+        ]),
+      ]);
+    },
+    Toast(props) {
+      const { text, icon, onDone } = props;
+      useEffect(() => {
+        const timer = setTimeout(() => { if (typeof onDone === "function") onDone(); }, 4000);
+        return () => clearTimeout(timer);
+      }, [onDone]);
+      return h("div", { className: "mpm-fb-toast", role: "alert" }, [icon || null, h("span", { key: "t" }, text)]);
+    },
+  };
+
+  let atoms = {};
+  try {
+    atoms = require("@deepseek-ai/dsh-client-ui-primitives") || {};
+  } catch (error) {
+    atoms = {};
+  }
+  const atom = (key) => (typeof atoms[key] === "function" ? atoms[key] : FALLBACK[key]);
+  const glyph = (key) => (typeof atoms[key] === "function" ? atoms[key] : NullIcon);
+
+  const Button = atom("Button");
+  const Pill = atom("Pill");
+  const Tag = atom("Tag");
+  const StateDot = atom("StateDot");
+  const Input = atom("Input");
+  const Menu = atom("Menu");
+  const Modal = atom("Modal");
+  const Toast = atom("Toast");
+  // 剪贴板用平台的 writeClipboard（失败反馈仍由本组件给出），缺失时退回本地实现。
+  const writeClipboard = typeof atoms.writeClipboard === "function" ? atoms.writeClipboard : fallbackClipboard;
+
+  const IconCheckOutline16 = glyph("IconCheckOutline16");
+  const IconChevronDownOutline14 = glyph("IconChevronDownOutline14");
+  const IconChevronUpOutline14 = glyph("IconChevronUpOutline14");
+  const IconCloseOutline16 = glyph("IconCloseOutline16");
+  const IconCopyOutline16 = glyph("IconCopyOutline16");
+  const IconDownloadOutline16 = glyph("IconDownloadOutline16");
+  const IconEditOutline16 = glyph("IconEditOutline16");
+  const IconEllipsisOutline16 = glyph("IconEllipsisOutline16");
+  const IconLinkOutline14 = glyph("IconLinkOutline14");
+  const IconPlusOutline16 = glyph("IconPlusOutline16");
+  const IconRefreshOutline16 = glyph("IconRefreshOutline16");
+  const IconSearchOutline16 = glyph("IconSearchOutline16");
+  const IconTrashOutline16 = glyph("IconTrashOutline16");
+  const IconWarningOutline16 = glyph("IconWarningOutline16");
 
   const name = "dsh-mcp-manager-panel";
   const inject = ["slots"];
@@ -54,26 +174,20 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     return String(error && error.message ? error.message : error);
   }
 
-  // ── 常量 ─────────────────────────────────────────────────────────────────
+  // ── 常量 ────────────────────────────────────────────────────────────────
   const TIERS = ["eager", "on-demand", "disabled"];
   const TIER_SHORT = { eager: "常驻", "on-demand": "按需", disabled: "停用" };
   const TIER_TEXT = {
-    eager: "eager · 常驻（启动自动连接）",
-    "on-demand": "on-demand · 按需加载",
+    eager: "eager · 常驻（随 DSH 启动自动连接）",
+    "on-demand": "on-demand · 按需加载（点“连接”才连）",
     disabled: "disabled · 停用（立即断开）",
   };
   const TIER_TITLE = "档位：eager=随启动自动连接｜on-demand=点“连接”再连｜disabled=停用";
-  const CONN_TEXT = { off: "未连接", connecting: "连接中…", connected: "已连接", error: "失败" };
   const VENDOR_LABEL = { pkulaw: "北大法宝", yuandian: "原点法律数据" };
   const SAMPLE_JSON = '{\n  "mcpServers": {\n    "pkulaw-law-search": {\n      "url": "https://example.com/mcp",\n      "headers": { "Authorization": "Bearer <令牌>" }\n    },\n    "local-fs-tools": {\n      "command": "npx",\n      "args": ["-y", "@some/mcp-server"],\n      "tier": "eager"\n    }\n  }\n}';
+  const IMPORT_PLACEHOLDER = '{\n  "mcpServers": {\n    "pkulaw-law-search": {\n      "url": "https://…/mcp",\n      "headers": { "Authorization": "Bearer …" }\n    }\n  }\n}';
 
   // ── 纯函数（供 UI 与开发冒烟测试复用）──────────────────────────────────
-  function hueFor(prefix) {
-    let acc = 0;
-    for (let i = 0; i < prefix.length; i++) acc = (acc * 31 + prefix.charCodeAt(i)) >>> 0;
-    return acc % 360;
-  }
-
   function vendorLabel(prefix) {
     return VENDOR_LABEL[prefix] ? VENDOR_LABEL[prefix] + " MCP" : prefix + " 系列";
   }
@@ -82,6 +196,28 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     if (!entry) return "";
     if (entry.transport === "streamable-http") return String(entry.url || "");
     return String(entry.command || "") + (entry.args && entry.args.length ? " " + entry.args.join(" ") : "");
+  }
+
+  function statusText(status, tools) {
+    if (status === "connected") return tools > 0 ? "已连接 · " + tools + " 工具" : "已连接";
+    if (status === "connecting") return "连接中…";
+    if (status === "error") return "连接失败";
+    return "未连接";
+  }
+
+  // 行/组状态 → 产品原子件的语义取值（StateDot 状态、Tag tone）。
+  function statusDot(status) {
+    if (status === "connected") return "done";
+    if (status === "connecting") return "ongoing";
+    if (status === "error") return "error";
+    return "idle";
+  }
+
+  function statusTone(status) {
+    if (status === "connected") return "success";
+    if (status === "connecting") return "warning";
+    if (status === "error") return "danger";
+    return "neutral";
   }
 
   // 按名称前缀分组：同前缀（第一个 - 之前）自动归组（含仅 1 个成员的情况，
@@ -103,6 +239,47 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       }
     }
     return items;
+  }
+
+  // 组级聚合：连接状态点（失败 > 连接中 > 已连接 > 未连接）、档位是否一致、工具/成员计数。
+  function groupStats(members) {
+    const tierSet = {};
+    let toolTotal = 0;
+    let connectedCount = 0;
+    let anyConnecting = false;
+    let anyError = false;
+    for (const member of members) {
+      tierSet[member.tier] = true;
+      toolTotal += member.toolCount || 0;
+      const status = member.conn && member.conn.status;
+      if (status === "connected") connectedCount += 1;
+      else if (status === "connecting") anyConnecting = true;
+      else if (status === "error") anyError = true;
+    }
+    const allSame = Object.keys(tierSet).length === 1;
+    let dot = "idle";
+    if (anyError) dot = "error";
+    else if (anyConnecting) dot = "ongoing";
+    else if (connectedCount > 0) dot = "done";
+    return {
+      count: members.length,
+      connectedCount,
+      toolTotal,
+      allSame,
+      effective: allSame ? members[0].tier : null,
+      dot,
+    };
+  }
+
+  // 组摘要行：真实前缀 + 档位 + 连接进度 + 工具总数（辅助信息，12px 三级色）。
+  function groupSummary(prefix, count, stats) {
+    const parts = [prefix];
+    parts.push(stats.allSame ? TIER_SHORT[stats.effective] + "档" : "档位不一致");
+    if (stats.connectedCount === 0) parts.push("未连接");
+    else if (stats.connectedCount === count) parts.push("已全部连接");
+    else parts.push("已连接 " + stats.connectedCount + "/" + count);
+    if (stats.toolTotal > 0) parts.push("共 " + stats.toolTotal + " 个工具");
+    return parts.join(" · ");
   }
 
   // 反向导出：注册表条目 → Claude/Cursor 风格 mcpServers JSON。
@@ -127,7 +304,8 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
   }
 
   // ── 浏览器小工具（仅在用户事件中调用）──────────────────────────────────
-  async function copyText(text) {
+  // 仅当平台未提供 writeClipboard 时才会用到（见上方解构）。
+  async function fallbackClipboard(text) {
     try {
       await navigator.clipboard.writeText(text);
       return true;
@@ -162,322 +340,443 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
 
   // ── 原子组件 ────────────────────────────────────────────────────────────
 
-  // 段式档位控件：常驻 / 按需 / 停用
-  function TierSeg(props) {
+  // 行内小标签（传输方式 / 鉴权）：产品 models 设置行的 rowTag 尺寸，
+  // 作为名称上的注释而不是第二个名字，所以是 11px + 中性描边。
+  function RowTag(props) {
+    return h("span", { className: "mpm-rowtag", title: props.title }, props.children);
+  }
+
+  // 图标按钮：产品 28x28 图标容器（Modal 关闭钮 / 设置关闭钮同族）。
+  function IconButton(props) {
+    const { label, title, expanded, haspopup, disabled, danger, onClick, children } = props;
+    return h("button", {
+      type: "button",
+      className: "mpm-iconbtn",
+      "aria-label": label,
+      "aria-expanded": expanded === undefined ? undefined : expanded === true,
+      "aria-haspopup": haspopup,
+      title: title || label,
+      disabled: disabled === true,
+      "data-danger": danger === true ? "true" : undefined,
+      onClick,
+    }, children);
+  }
+
+  // 档位控件：三个可选中 Pill（产品 Pill 的 active 态即分段选中态）。
+  // 禁用时不给 onClick（Pill 退化为静态 span），并以 aria-disabled 表意，
+  // 避免把 disabled 属性渲染到非表单元素上。
+  function TierPicker(props) {
     const { value, onChange, disabled, title } = props;
-    return h("div", { className: "mpm-seg", role: "radiogroup", title: title || TIER_TITLE }, TIERS.map((val) =>
-      h("button", {
-        key: val,
-        type: "button",
+    const off = disabled === true;
+    return h("div", { className: "mpm-tier", role: "radiogroup", "aria-label": "档位", title: title || TIER_TITLE },
+      TIERS.map((tier) => h(Pill, {
+        key: tier,
+        className: "mpm-tier-pill",
+        active: value === tier,
         role: "radio",
-        "aria-checked": value === val,
-        className: "mpm-seg-btn" + (value === val ? " on" : ""),
-        disabled: disabled === true,
-        title: TIER_TEXT[val],
-        onClick: () => { if (onChange && !disabled) onChange(val); },
-      }, TIER_SHORT[val]),
-    ));
+        "aria-checked": value === tier,
+        "aria-disabled": off ? "true" : undefined,
+        title: TIER_TEXT[tier],
+        onClick: off ? undefined : () => onChange(tier),
+      }, TIER_SHORT[tier])),
+    );
   }
 
-  // 状态徽章：● 已连接 · N 工具 / 连接中… / 失败（可展开详情）
-  function StatusBadge(props) {
-    const { status, toolCount, error, detailOpen, onDetail } = props;
-    const kids = [h("span", { className: "mpm-bdot " + status, key: "d" })];
-    if (status === "connected") {
-      kids.push(h("span", { className: "mpm-btxt", key: "t" }, "已连接" + (toolCount > 0 ? " · " + toolCount + " 工具" : "")));
-    } else {
-      kids.push(h("span", { className: "mpm-btxt", key: "t" }, CONN_TEXT[status] || status));
+  // 连接状态：语义 Tag +（失败时）错误详情展开钮。
+  function StatusTag(props) {
+    const { status, tools, detailOpen, onDetail } = props;
+    const kids = [h(Tag, { key: "t", tone: statusTone(status) }, statusText(status, tools))];
+    if (status === "error" && onDetail) {
+      kids.push(h(IconButton, {
+        key: "d",
+        label: detailOpen ? "收起错误详情" : "查看错误详情",
+        onClick: onDetail,
+      }, detailOpen ? h(IconChevronUpOutline14, { size: 12 }) : h(IconChevronDownOutline14, { size: 12 })));
     }
-    if (status === "error" && error) {
-      kids.push(h("button", {
-        type: "button", key: "x", className: "mpm-blink",
-        onClick: onDetail, title: "查看错误详情", "aria-label": "查看错误详情",
-      }, detailOpen ? "▴" : "▾"));
-    }
-    return h("span", { className: "mpm-badge " + status, title: status === "error" ? error : undefined }, kids);
+    return h("span", { className: "mpm-status" }, kids);
   }
 
-  function MessageBanner(props) {
-    const { message, onDismiss } = props;
-    if (!message) return null;
-    return h("div", { className: "mpm-msg " + message.kind, role: "status" }, [
-      h("span", { className: "mpm-msg-icon", key: "i" }, message.kind === "ok" ? "✓" : "⚠"),
-      h("span", { className: "mpm-msg-text", key: "t" }, message.text),
-      h("button", { type: "button", className: "mpm-msg-x", key: "x", onClick: onDismiss, "aria-label": "关闭提示" }, "✕"),
-    ]);
-  }
-
-  // 工具列表展开条（在行下方内联展开，避免被滚动容器裁切）
-  function toolStrip(entry, opts) {
+  // 工具详情：内嵌面板（产品卡片展开区的 bg-module-platform + 顶部 0.5px 分隔）。
+  function ToolPanel(props) {
+    const { entry, opts } = props;
     const tools = Array.isArray(entry.tools) ? entry.tools : [];
-    const prefix = "mcp__" + entry.name + "__*";
-    return h("div", { className: "mpm-toolstrip", key: "ts-" + entry.name }, [
-      h("div", { className: "mpm-toolstrip-head", key: "h" }, [
-        h("span", { className: "mpm-tp-title", key: "t" }, "「" + entry.name + "」的工具（" + tools.length + "）"),
-        entry.serverTitle || entry.serverVersion
-          ? h("span", { className: "mpm-tp-server", key: "s" }, (entry.serverTitle || "MCP 服务") + (entry.serverVersion ? " v" + entry.serverVersion : ""))
-          : null,
-        h("span", { className: "mpm-toolstrip-grow", key: "g" }),
-        h("button", {
-          type: "button", className: "mpm-btn tiny", key: "c",
-          onClick: () => opts.onCopy(prefix, prefix),
-          title: "复制整组调用前缀",
-        }, opts.copied === prefix ? "✓ 已复制" : "复制前缀"),
-        h("button", { type: "button", className: "mpm-btn tiny", key: "x", onClick: () => opts.onToggleTools(entry.name) }, "收起 ▴"),
-      ]),
-      tools.length === 0
-        ? h("div", { className: "mpm-tp-empty", key: "e" }, "暂无工具列表（注册表快照为空；断开重连后自动回写）。")
-        : h("ul", { className: "mpm-tp-grid", key: "l" }, tools.map((t) => {
-            const full = "mcp__" + entry.name + "__" + t;
-            return h("li", { key: t }, [
-              h("code", { className: "mpm-tp-name", key: "n" }, t),
-              h("button", {
-                type: "button", className: "mpm-btn tiny", key: "k",
-                onClick: () => opts.onCopy(full, full),
-                title: "复制 " + full,
-              }, opts.copied === full ? "✓" : "复制"),
-            ]);
-          })),
+    const prefixExpr = "mcp__" + entry.name + "__*";
+    const prefixCopied = opts.copied === prefixExpr;
+    const head = h("div", { className: "mpm-tools-head", key: "h" }, [
+      h("span", { className: "mpm-tools-title", key: "t" }, "「" + entry.name + "」的工具（" + tools.length + "）"),
+      entry.serverTitle || entry.serverVersion
+        ? h("span", { className: "mpm-tools-server", key: "s" }, (entry.serverTitle || "MCP 服务") + (entry.serverVersion ? " v" + entry.serverVersion : ""))
+        : null,
+      h("span", { className: "mpm-spacer", key: "g" }),
+      h(Button, {
+        key: "c", size: "sm", variant: "ghost",
+        icon: prefixCopied ? h(IconCheckOutline16, { size: 14 }) : h(IconCopyOutline16, { size: 14 }),
+        onClick: () => opts.onCopy(prefixExpr, prefixExpr),
+      }, prefixCopied ? "已复制" : "复制前缀"),
+      h(Button, {
+        key: "x", size: "sm", variant: "ghost",
+        icon: h(IconChevronUpOutline14, { size: 14 }),
+        onClick: () => opts.onToggleTools(entry.name),
+      }, "收起"),
     ]);
+    const list = tools.length === 0
+      ? h("p", { className: "mpm-tools-empty", key: "e" }, "暂无工具快照；断开后重新连接会自动回写。")
+      : h("ul", { className: "mpm-tools-list", key: "l" }, tools.map((tool) => {
+        const full = "mcp__" + entry.name + "__" + tool;
+        const done = opts.copied === full;
+        return h("li", { className: "mpm-tool", key: tool }, [
+          h("code", { className: "mpm-tool-name", key: "n", title: full }, tool),
+          h(Button, {
+            key: "c", size: "sm", variant: "ghost",
+            icon: done ? h(IconCheckOutline16, { size: 14 }) : h(IconCopyOutline16, { size: 14 }),
+            onClick: () => opts.onCopy(full, full),
+          }, done ? "已复制" : "复制"),
+        ]);
+      }));
+    return h("div", { className: "mpm-tools" }, [head, list]);
   }
 
-  // ── 行 / 组渲染 ─────────────────────────────────────────────────────────
-
-  // 调用方负责在行后追加 toolStrip（见 groupCard / 单条渲染）。
-  function serviceRow(entry, shortName, opts) {
+  // 成员行 + 可选工具面板（外层 .mpm-item 承担行分隔线，最后一项去掉分隔线）。
+  function MemberItem(props) {
+    const { entry, shortName, opts } = props;
     const conn = entry.conn || {};
-    const st = conn.status || "off";
-    const err = st === "error" ? String(conn.error || "") : "";
-    const liveTools = st === "connected" && typeof conn.tools === "number" ? conn.tools : (entry.toolCount || 0);
+    const status = conn.status || "off";
+    const err = status === "error" ? String(conn.error || "") : "";
+    const liveTools = status === "connected" && typeof conn.tools === "number" ? conn.tools : (entry.toolCount || 0);
     const busy = opts.busyNames[entry.name] === true;
-    const isErrOpen = opts.errorOpen === entry.name;
-    const isToolOpen = opts.toolPop === entry.name;
-    const transport = entry.transport === "stdio" ? "本机" : "HTTP";
+    const errOpen = opts.errorOpen === entry.name;
+    const toolOpen = opts.toolPop === entry.name;
     const hasAuth = entry.headers && typeof entry.headers === "object" && Object.keys(entry.headers).length > 0;
 
-    const nameCell = h("div", { className: "mpm-tname", key: "nm" }, [
-      h("div", { className: "mpm-tnameline", key: "ln" }, [
-        h("span", { className: "mpm-tfull", key: "f", title: entry.name }, shortName || entry.name),
-        h("span", { className: "mpm-tbadge " + (entry.transport === "stdio" ? "cli" : "http"), key: "tb" }, transport),
-        hasAuth ? h("span", { className: "mpm-tbadge auth", key: "au", title: "携带鉴权请求头" }, "鉴权") : null,
+    const row = h("div", { className: "mpm-row", key: "row", "data-conn": status, "aria-busy": busy ? "true" : undefined }, [
+      h("div", { className: "mpm-rid", key: "id" }, [
+        h("div", { className: "mpm-rnameline", key: "n" }, [
+          h(StateDot, { key: "d", state: statusDot(status) }),
+          h("span", { className: "mpm-rname", key: "t", title: entry.name }, shortName || entry.name),
+          h(RowTag, { key: "tr" }, entry.transport === "stdio" ? "本机" : "HTTP"),
+          hasAuth ? h(RowTag, { key: "au", title: "连接时携带鉴权请求头" }, "鉴权") : null,
+        ]),
+        h("code", { className: "mpm-rep", key: "e", title: endpointText(entry) }, endpointText(entry) || "（未配置端点）"),
+        status === "error" && errOpen ? h("p", { className: "mpm-rerr", key: "er" }, err) : null,
       ]),
-      h("div", { className: "mpm-tep", key: "ep", title: endpointText(entry) }, endpointText(entry) || "（未配置端点）"),
-      st === "error" && isErrOpen ? h("div", { className: "mpm-terr", key: "er" }, err) : null,
-    ]);
-
-    const connCell = h("div", { className: "mpm-tconnwrap", key: "co" }, [
-      h(StatusBadge, {
-        key: "bd",
-        status: st,
-        toolCount: liveTools,
-        error: err,
-        detailOpen: isErrOpen,
-        onDetail: () => opts.onToggleError(entry.name),
-      }),
-      st === "connected"
-        ? h("button", { type: "button", className: "mpm-btn", key: "u", onClick: () => opts.onUnload(entry.name), disabled: busy }, "断开")
-        : h("button", { type: "button", className: "mpm-btn primary", key: "l", onClick: () => opts.onLoad(entry.name), disabled: busy }, busy ? "连接中…" : "连接"),
-    ]);
-
-    const tierCell = h(TierSeg, { key: "ti", value: entry.tier, onChange: (next) => opts.onTier(entry.name, next), disabled: busy });
-
-    const toolsCell = h("div", { className: "mpm-ttools", key: "tc" }, [
-      liveTools > 0
-        ? h("button", {
-            type: "button", className: "mpm-chip", key: "chip",
-            onClick: () => opts.onToggleTools(entry.name),
-            "aria-expanded": isToolOpen,
+      h("div", { className: "mpm-ractions", key: "ac" }, [
+        h(StatusTag, {
+          key: "s", status, tools: liveTools, detailOpen: errOpen,
+          onDetail: () => opts.onToggleError(entry.name),
+        }),
+        status === "connected"
+          ? h(Button, { key: "b", size: "sm", variant: "ghost", disabled: busy, onClick: () => opts.onUnload(entry.name) }, busy ? "断开中…" : "断开")
+          : h(Button, { key: "b", size: "sm", variant: "outline", disabled: busy, onClick: () => opts.onLoad(entry.name) }, busy ? "连接中…" : "连接"),
+        h(TierPicker, { key: "t", value: entry.tier, disabled: busy, onChange: (tier) => opts.onTier(entry.name, tier) }),
+        liveTools > 0
+          ? h(Pill, {
+            key: "p", className: "mpm-toolpill", active: toolOpen, "aria-expanded": toolOpen,
             title: "查看该服务的工具列表",
-          }, [
-            h("span", { key: "i", className: "mpm-chip-ic" }, "⚙"),
-            h("span", { key: "t" }, liveTools + " 工具" + (isToolOpen ? " ▴" : " ▾")),
-          ])
-        : h("span", { className: "mpm-muted", key: "no" }, "—"),
+            onClick: () => opts.onToggleTools(entry.name),
+          }, liveTools + " 工具")
+          : null,
+        h(IconButton, { key: "d", label: "删除 " + entry.name, danger: true, onClick: () => opts.onAskDelete(entry) }, h(IconTrashOutline16, { size: 14 })),
+      ]),
     ]);
 
-    const delCell = opts.confirmDelete === entry.name
-      ? h("div", { className: "mpm-tdel confirm", key: "dl" }, [
-          h("span", { className: "mpm-confirm", key: "t" }, "确认删除？"),
-          h("div", { className: "mpm-tdel-btns", key: "b" }, [
-            h("button", { type: "button", className: "mpm-btn danger tiny", key: "y", onClick: () => opts.onDelete(entry.name) }, "删除"),
-            h("button", { type: "button", className: "mpm-btn tiny", key: "n", onClick: () => opts.onCancelDelete() }, "取消"),
-          ]),
-        ])
-      : h("button", { type: "button", className: "mpm-btn danger tiny", key: "dl", onClick: () => opts.onAskDelete(entry.name), title: "删除该服务" }, "删除");
-
-    return h("div", { className: "mpm-grid mpm-trow", key: entry.name }, [nameCell, connCell, tierCell, toolsCell, delCell]);
+    return h("div", { className: "mpm-item" }, [row, toolOpen ? h(ToolPanel, { key: "tp", entry, opts }) : null]);
   }
 
-  function groupCard(prefix, members, opts) {
+  // 服务分组卡：组头（折叠按钮 + 状态点 + 组名 + 服务数）+ 摘要 + 动作（档位/全部连接/⋯ 菜单）。
+  function GroupCard(props) {
+    const { prefix, members, opts } = props;
     const sorted = members.slice().sort((a, b) => (a.name < b.name ? -1 : 1));
-    const single = sorted.length === 1;
-    const tierSet = {};
-    let toolTotal = 0;
-    let connectedCount = 0;
-    let anyConnecting = false;
-    let anyError = false;
-    for (const m of sorted) {
-      tierSet[m.tier] = true;
-      toolTotal += m.toolCount || 0;
-      const st = m.conn && m.conn.status;
-      if (st === "connected") connectedCount += 1;
-      else if (st === "connecting") anyConnecting = true;
-      else if (st === "error") anyError = true;
-    }
-    // 组头圆点：仅在“已有成员连接”时绿色；失败为红、连接中琥珀闪动、否则灰。
-    let dot = "off";
-    if (anyError) dot = "error";
-    else if (anyConnecting) dot = "connecting";
-    else if (connectedCount > 0) dot = "connected";
-    const allSame = Object.keys(tierSet).length === 1;
-    const effective = allSame ? sorted[0].tier : null;
-    // 折叠状态统一读 isOpen：单成员组的“默认展开”由 ManagerView 提供的默认值实现。
+    const stats = groupStats(sorted);
     const open = opts.isOpen(prefix);
-    const allConnected = connectedCount === sorted.length;
     const busy = opts.applyingGroup === prefix;
-    // 组名：自定义名（groups.json）优先，否则厂商自动名；只影响显示。
-    const metaTitle = opts.groupMeta && opts.groupMeta[prefix] && opts.groupMeta[prefix].title
-      ? String(opts.groupMeta[prefix].title) : "";
-    const label = metaTitle || vendorLabel(prefix);
+    const label = (opts.groupMeta && opts.groupMeta[prefix] && opts.groupMeta[prefix].title)
+      ? String(opts.groupMeta[prefix].title) : vendorLabel(prefix);
     const editing = opts.editingTitle === prefix;
-    const sub = (single
-      ? prefix + " · " + (allSame ? TIER_SHORT[effective] + "档" : "档位不一致") +
-        " · " + (connectedCount === 1 ? "已连接" : "未连接") +
-        (toolTotal > 0 ? " · 共 " + toolTotal + " 个工具" : "")
-      : prefix + " · " + sorted.length + " 个服务 · " + (allSame ? TIER_SHORT[effective] + "档" : "档位不一致") +
-        " · 已连接 " + connectedCount + "/" + sorted.length +
-        (toolTotal > 0 ? " · 共 " + toolTotal + " 个工具" : ""));
+    const panelId = "mpm-members-" + prefix;
+    const connected = stats.connectedCount === sorted.length;
 
-    // 组头动作：多成员组与单成员组同款（全部连接/全部断开/整组档位/展开成员/删除整组）。
-    const dotTip = dot === "connected" ? "已有成员已连接" : dot === "connecting" ? "有成员连接中" : dot === "error" ? "有成员连接失败" : "全部未连接";
-    const headKids = [
-      h("span", { className: "mpm-gdot " + dot, key: "d", title: dotTip }),
-      h("div", { className: "mpm-ginfo", key: "i" }, [
-        h("div", { className: "mpm-gtitle-row", key: "t" }, editing
-          ? [
-              h("input", {
-                key: "in", className: "mpm-gtitle-input", type: "text",
-                value: opts.titleDraft, maxLength: 40, autoFocus: true,
-                placeholder: "输入组名（只改显示名）",
-                onChange: (event) => opts.onTitleDraft(event.target.value),
-                onKeyDown: (event) => {
-                  if (event.key === "Enter") opts.onSaveTitle(prefix);
-                  else if (event.key === "Escape") opts.onCancelTitle();
-                },
-              }),
-              h("span", { className: "mpm-gtitle-tip", key: "tip" }, "回车保存 · Esc 取消"),
-            ]
-          : [
-              h("span", { className: "mpm-gtitle", key: "tx" }, label),
-              h("button", { type: "button", className: "mpm-gedit-btn", key: "ed",
-                onClick: () => opts.onEditTitle(prefix),
-                title: "修改组名（只改显示名，不影响服务前缀）", "aria-label": "修改组名 " + prefix }, "✎"),
-            ]),
-        h("div", { className: "mpm-gsub", key: "s" }, sub),
-      ]),
-      h("div", { className: "mpm-grow", key: "g" }),
-      h("div", { className: "mpm-gactions", key: "a" }, [
-        h("button", { type: "button", className: "mpm-btn", key: "gl", onClick: () => opts.onGroupLoad(prefix, sorted), disabled: busy || allConnected },
-          allConnected ? "已全部连接" : "全部连接"),
-        h("button", { type: "button", className: "mpm-btn", key: "gu", onClick: () => opts.onGroupUnload(prefix, sorted), disabled: busy || connectedCount === 0 },
-          "全部断开"),
-        h(TierSeg, {
-          key: "seg",
-          value: effective,
-          onChange: (tier) => opts.onGroupTier(prefix, sorted, tier),
-          disabled: busy,
-          title: effective ? "整体档位：一键应用到该组全部服务；展开后可逐条微调" : "成员档位不一致，点击任一档位可将整组拉齐",
+    const identity = editing
+      ? h("div", { className: "mpm-gtitle-edit", key: "edit" }, [
+        h(Input, {
+          key: "i", className: "mpm-input", value: opts.titleDraft, maxLength: 40, autoFocus: true,
+          placeholder: "输入组名（只改显示名）", "aria-label": "组显示名",
+          onChange: (event) => opts.onTitleDraft(event.target.value),
+          onKeyDown: (event) => {
+            if (event.key === "Enter") opts.onSaveTitle(prefix);
+            else if (event.key === "Escape") opts.onCancelTitle();
+          },
         }),
-        h("button", { type: "button", className: "mpm-btn", key: "tg", onClick: () => opts.onToggleGroup(prefix) },
-          open ? "收起成员 ▲" : "展开成员 ▼ " + sorted.length),
-        opts.confirmGroupDelete === prefix
-          ? h("div", { className: "mpm-gdel confirm", key: "gd" }, [
-              h("span", { className: "mpm-confirm", key: "t" }, "确认删除整组（" + sorted.length + " 个服务）？"),
-              h("div", { className: "mpm-gdel-btns", key: "b" }, [
-                h("button", { type: "button", className: "mpm-btn danger tiny", key: "y", onClick: () => opts.onGroupDelete(prefix, sorted) }, "删除"),
-                h("button", { type: "button", className: "mpm-btn tiny", key: "n", onClick: () => opts.onCancelGroupDelete() }, "取消"),
-              ]),
-            ])
-          : h("button", { type: "button", className: "mpm-btn danger tiny", key: "gd", onClick: () => opts.onAskGroupDelete(prefix), title: "删除整组（" + sorted.length + " 个服务，已连接的会立即断开）" }, "删除整组"),
-      ]),
+        h(IconButton, { key: "s", label: "保存组名", onClick: () => opts.onSaveTitle(prefix) }, h(IconCheckOutline16, { size: 14 })),
+        h(IconButton, { key: "c", label: "取消改名", onClick: opts.onCancelTitle }, h(IconCloseOutline16, { size: 14 })),
+        h("span", { className: "mpm-hint", key: "h" }, "回车保存 · Esc 取消"),
+      ])
+      : h("div", { className: "mpm-gtitle-row", key: "view" }, [
+        h("button", {
+          key: "toggle",
+          type: "button", className: "mpm-gtoggle",
+          "aria-expanded": open, "aria-controls": panelId,
+          onClick: () => opts.onToggleGroup(prefix),
+        }, [
+          h(IconChevronDownOutline14, { key: "c", className: "mpm-chev", size: 12, "aria-hidden": "true" }),
+          h(StateDot, { key: "d", state: stats.dot }),
+          h("span", { className: "mpm-gtitle", key: "t", title: label }, label),
+        ]),
+        h(Tag, { key: "n", tone: "neutral" }, sorted.length + " 个服务"),
+      ]);
+
+    const menuItems = [
+      { id: "rename", label: "重命名组", icon: h(IconEditOutline16, { size: 14 }) },
+      { id: "copy", label: "复制调用前缀", icon: h(IconLinkOutline14, { size: 14 }) },
+      { type: "separator", id: "sep" },
+      { id: "unload", label: "全部断开", icon: h(IconCloseOutline16, { size: 14 }), disabled: stats.connectedCount === 0 },
+      { id: "delete", label: "删除整组", icon: h(IconTrashOutline16, { size: 14 }), danger: true },
     ];
 
-    const children = [h("div", { className: "mpm-ghead", key: "h" }, headKids)];
-    if (open) {
-      const rows = [h("div", { className: "mpm-grid mpm-thead", key: "th" }, [
-        h("span", { key: "c1" }, "服务 / 端点"),
-        h("span", { key: "c2" }, "连接"),
-        h("span", { key: "c3" }, "档位"),
-        h("span", { key: "c4" }, "工具"),
-        h("span", { key: "c5" }, "操作"),
-      ])];
-      for (const entry of sorted) {
-        rows.push(serviceRow(entry, entry.name.slice(prefix.length + 1), opts));
-        if (opts.toolPop === entry.name) rows.push(toolStrip(entry, opts));
-      }
-      children.push(h("div", { className: "mpm-members mpm-scroll", key: "m" }, rows));
-    }
-    return h("div", { className: "mpm-group", key: "g-" + prefix }, children);
-  }
-
-  // ── 导入卡片 ────────────────────────────────────────────────────────────
-  function ImportCard(props) {
-    const { open, onOpen, onClose, text, onText, importing, onImport, onClear, onRefresh, refreshing, showSample, onToggleSample, taRef } = props;
-    if (!open) {
-      return h("div", { className: "mpm-card mpm-import-closed" }, [
-        h("button", { type: "button", className: "mpm-sec-btn", key: "b", onClick: onOpen }, "＋ 添加新的 MCP 服务"),
-        h("span", { className: "mpm-cap muted", key: "hint" }, "粘贴服务商配置（Claude/Cursor 格式 mcpServers JSON）一键导入 · eager 自动连接"),
-      ]);
-    }
-    return h("div", { className: "mpm-card" }, [
-      h("div", { className: "mpm-cardhead", key: "hd" }, [
-        h("div", { key: "t" }, [
-          h("div", { className: "mpm-sec", key: "t" }, "添加新的 MCP 服务"),
-          h("div", { className: "mpm-cap", key: "c" }, "可整段粘贴 mcpServers JSON；重复名称会更新，同前缀自动归组；eager 项导入后自动连接，disabled 立即断开。"),
-        ]),
-        h("button", { type: "button", className: "mpm-btn", key: "cl", onClick: onClose, title: "收起导入区" }, "收起 ▲"),
+    const head = h("div", { className: "mpm-ghead", key: "h" }, [
+      h("div", { className: "mpm-gid", key: "i" }, [
+        identity,
+        h("div", { className: "mpm-gsub", key: "s" }, groupSummary(prefix, sorted.length, stats)),
       ]),
-      h("textarea", {
-        className: "mpm-import", key: "ta", rows: 7, spellCheck: false,
-        ref: taRef,
-        value: text,
-        onChange: (event) => onText(event.target.value),
-        placeholder: '{\n  "mcpServers": {\n    "pkulaw-law-search": {\n      "url": "https://…/mcp",\n      "headers": { "Authorization": "Bearer …" }\n    }\n  }\n}',
-      }),
-      showSample ? h("pre", { className: "mpm-sample", key: "sm" }, SAMPLE_JSON) : null,
-      h("div", { className: "mpm-toolbar", key: "b" }, [
-        h("button", { type: "button", className: "mpm-btn primary", key: "go", onClick: onImport, disabled: importing }, importing ? "导入中…" : "一键导入"),
-        h("button", { type: "button", className: "mpm-btn", key: "ex", onClick: onToggleSample }, showSample ? "隐藏示例" : "查看示例"),
-        h("button", { type: "button", className: "mpm-btn", key: "cl", onClick: onClear, disabled: text === "" }, "清空"),
-        h("button", { type: "button", className: "mpm-btn", key: "rf", onClick: onRefresh, disabled: refreshing }, "刷新列表"),
+      h("div", { className: "mpm-gactions", key: "a" }, [
+        h(TierPicker, {
+          key: "t", value: stats.allSame ? stats.effective : null, disabled: busy,
+          onChange: (tier) => opts.onGroupTier(prefix, sorted, tier),
+          title: stats.allSame
+            ? "整组档位：一键应用到该组全部服务；展开后可逐条微调"
+            : "成员档位不一致，点任一档位可把整组拉齐",
+        }),
+        h(Button, {
+          key: "l", size: "sm", variant: "outline",
+          disabled: busy || connected,
+          onClick: () => opts.onGroupLoad(prefix, sorted),
+        }, connected ? "已全部连接" : busy ? "处理中…" : "全部连接"),
+        h(Menu, {
+          key: "m",
+          open: opts.menuFor === prefix,
+          onClose: opts.onCloseMenu,
+          align: "end",
+          portal: true,
+          items: menuItems,
+          onSelect: (id) => opts.onGroupMenu(prefix, sorted, id),
+          anchor: h(IconButton, {
+            label: "「" + label + "」的更多操作",
+            expanded: opts.menuFor === prefix,
+            haspopup: "menu",
+            onClick: () => opts.onToggleMenu(prefix),
+          }, h(IconEllipsisOutline16, { size: 16 })),
+        }),
       ]),
     ]);
+
+    const body = open
+      ? h("div", { className: "mpm-members", id: panelId, key: "b" }, sorted.map((entry) => h(MemberItem, {
+        key: entry.name,
+        entry,
+        shortName: entry.name.slice(prefix.length + 1),
+        opts,
+      })))
+      : null;
+
+    return h("section", {
+      className: "mpm-group",
+      "data-open": open ? "true" : undefined,
+      "data-state": stats.dot,
+    }, [head, body]);
+  }
+
+  // 无有效前缀的单条：一张只含成员行的卡片（不再造第二种组头）。
+  function SingleCard(props) {
+    const { entry, opts } = props;
+    return h("section", { className: "mpm-group mpm-single" }, h(MemberItem, { entry, shortName: null, opts }));
+  }
+
+  // ── 顶栏 / 空态 / 骨架 ──────────────────────────────────────────────────
+
+  // 搜索框：产品设置页搜索字段（plugin-inventory 的 .search 同款尺寸与焦点环）。
+  function SearchField(props) {
+    return h("label", { className: "mpm-search" }, [
+      h(IconSearchOutline16, { key: "i", "aria-hidden": "true" }),
+      h("span", { className: "mpm-visually-hidden", key: "l" }, "搜索 MCP 服务"),
+      h("input", {
+        key: "in", type: "search", value: props.value,
+        placeholder: "搜索名称 / 端点 / 工具…",
+        "aria-label": "搜索 MCP 服务",
+        onChange: (event) => props.onChange(event.target.value),
+      }),
+    ]);
+  }
+
+  function StatsLine(props) {
+    const { stats, expandAll, onToggleAll, disabled } = props;
+    const parts = [stats.total + " 个服务", stats.connected + " 已连接", stats.tools + " 在线工具"];
+    if (stats.eager > 0) parts.push(stats.eager + " 常驻");
+    if (stats.disabled > 0) parts.push(stats.disabled + " 停用");
+    return h("div", { className: "mpm-stats" }, [
+      h("span", { className: "mpm-stats-text", key: "t" }, parts.join(" · ")),
+      h("span", { className: "mpm-spacer", key: "g" }),
+      h(Button, { key: "e", size: "sm", variant: "ghost", disabled, onClick: onToggleAll }, expandAll === true ? "全部收起" : "全部展开"),
+    ]);
+  }
+
+  function SkeletonList() {
+    const rows = [];
+    for (let i = 0; i < 3; i++) {
+      rows.push(h("div", { className: "mpm-skel", key: i }, [
+        h("span", { className: "mpm-skel-bar", key: "a" }),
+        h("span", { className: "mpm-skel-bar short", key: "b" }),
+      ]));
+    }
+    return h("div", { className: "mpm-skels", "aria-hidden": "true" }, rows);
+  }
+
+  function EmptyState(props) {
+    return h("div", { className: "mpm-empty" }, [
+      h("p", { className: "mpm-empty-title", key: "t" }, "还没有 MCP 服务"),
+      h("p", { className: "mpm-empty-sub", key: "s" }, "把服务商给的 mcpServers 配置粘贴进来即可开始管理；连接成功后工具以 mcp__<名称>__<工具> 供 AI 调用。"),
+      h(Button, {
+        key: "b", variant: "primary", icon: h(IconPlusOutline16, { size: 14 }),
+        onClick: props.onImport,
+      }, "粘贴配置并导入"),
+    ]);
+  }
+
+  // ── 弹层：导入 / 删除确认 / 行内错误提示 ────────────────────────────────
+
+  function NoticeAlert(props) {
+    const { text, details, onDismiss } = props;
+    return h("div", { className: "mpm-alert", role: "alert" }, [
+      h(IconWarningOutline16, { key: "i", size: 16, className: "mpm-alert-ic" }),
+      h("div", { className: "mpm-alert-body", key: "b" }, [
+        h("p", { className: "mpm-alert-text", key: "t" }, text),
+        details && details.length > 0
+          ? h("ul", { className: "mpm-alert-list", key: "l" }, details.map((line, index) => h("li", { key: index }, line)))
+          : null,
+      ]),
+      typeof onDismiss === "function"
+        ? h(IconButton, { key: "x", label: "关闭提示", onClick: onDismiss }, h(IconCloseOutline16, { size: 14 }))
+        : null,
+    ]);
+  }
+
+  // 导入结果摘要（宿主 rows[].status: added / updated / error）。
+  function importSummary(result) {
+    const rows = result && Array.isArray(result.rows) ? result.rows : [];
+    const added = rows.filter((row) => row.status === "added").length;
+    const updated = rows.filter((row) => row.status === "updated").length;
+    const failed = rows.filter((row) => row.status === "error").length;
+    const parts = ["新增 " + added, "更新 " + updated];
+    if (failed > 0) parts.push("失败 " + failed);
+    return { rows, added, updated, failed, title: "导入结果：" + parts.join(" · ") };
+  }
+
+  function ImportDialog(props) {
+    const { open, onClose, text, onText, onImport, importing, refreshing, onRefresh, showSample, onToggleSample, result, error } = props;
+    const summary = importSummary(result);
+    const resultRows = summary.rows;
+    const kids = [
+      h("label", { className: "mpm-field", key: "f" }, [
+        h("span", { className: "mpm-field-label", key: "l" }, "mcpServers JSON"),
+        h("textarea", {
+          key: "t", className: "mpm-textarea", rows: 10, spellCheck: false, autoFocus: true,
+          value: text, placeholder: IMPORT_PLACEHOLDER,
+          onChange: (event) => onText(event.target.value),
+        }),
+      ]),
+      h("div", { className: "mpm-dialog-tools", key: "tb" }, [
+        h(Button, { key: "s", size: "sm", variant: "ghost", onClick: onToggleSample }, showSample ? "隐藏示例" : "查看示例"),
+        h(Button, { key: "c", size: "sm", variant: "ghost", disabled: text === "", onClick: () => onText("") }, "清空"),
+        h(Button, { key: "r", size: "sm", variant: "ghost", disabled: refreshing, onClick: onRefresh }, refreshing ? "刷新中…" : "刷新列表"),
+      ]),
+    ];
+    if (showSample) kids.push(h("pre", { className: "mpm-sample", key: "sm" }, SAMPLE_JSON));
+    if (error) {
+      kids.push(h("div", { className: "mpm-alert", role: "alert", key: "err" }, [
+        h(IconWarningOutline16, { key: "i", size: 16, className: "mpm-alert-ic" }),
+        h("p", { className: "mpm-alert-text", key: "t" }, error),
+      ]));
+    }
+    if (resultRows.length > 0) {
+      kids.push(h("div", { className: "mpm-result", key: "res", role: "status" }, [
+        h("p", { className: "mpm-result-title", key: "t" }, summary.title),
+        h("ul", { className: "mpm-result-list", key: "l" }, resultRows.map((row, index) => h("li", {
+          key: index, className: "mpm-result-row", "data-status": row.status,
+        }, [
+          row.status === "error"
+            ? h(IconWarningOutline16, { key: "i", size: 14 })
+            : h(IconCheckOutline16, { key: "i", size: 14 }),
+          h("code", { key: "n" }, row.name),
+          h("span", { key: "s" }, row.status === "error" ? row.error : row.status === "added" ? "新增" : "更新"),
+        ]))),
+      ]));
+    }
+    return h(Modal, {
+      open,
+      onClose,
+      title: "添加新的 MCP 服务",
+      closeLabel: "关闭",
+      description: "粘贴服务商给的 mcpServers JSON（Claude/Cursor 格式）：同名条目更新，同前缀自动归组；eager 项导入后自动连接。",
+      className: "mpm-dialog mpm-dialog-wide",
+      contentClassName: "mpm-dialog-content",
+      footer: [
+        h(Button, { key: "c", variant: "outline", onClick: onClose }, "关闭"),
+        h(Button, {
+          key: "i", variant: "primary",
+          disabled: importing || text.trim() === "",
+          onClick: onImport,
+        }, importing ? "导入中…" : "一键导入"),
+      ],
+    }, kids);
+  }
+
+  function ConfirmDialog(props) {
+    const { confirm, busy, onCancel, onConfirm } = props;
+    if (!confirm) return null;
+    const isGroup = confirm.kind === "group";
+    const memberCount = confirm.members ? confirm.members.length : 0;
+    return h(Modal, {
+      open: true,
+      onClose: onCancel,
+      title: isGroup ? "删除整组服务" : "删除 MCP 服务",
+      closeLabel: "取消",
+      description: isGroup
+        ? "将删除「" + confirm.label + "」下的 " + memberCount + " 个服务（已连接的会先断开）。注册表条目一并移除，此操作不可撤销。"
+        : "将删除「" + confirm.name + "」，已连接的会先断开。此操作不可撤销。",
+      className: "mpm-dialog",
+      footer: [
+        h(Button, { key: "c", variant: "outline", autoFocus: true, onClick: onCancel }, "取消"),
+        h(Button, {
+          key: "d", variant: "outline", className: "mpm-danger",
+          disabled: busy === true, onClick: onConfirm,
+        }, busy === true ? "处理中…" : "删除"),
+      ],
+    });
   }
 
   // ── 主视图（纯 props 驱动，便于冒烟渲染）────────────────────────────────
   function ManagerView(props) {
     const {
-      entries, path, loading, error, importing, refreshing,
-      busyNames, applyingGroup, message, onDismissMessage,
-      onRefresh, onImport, onTier, onDelete, onLoad, onUnload,
-      onGroupTier, onGroupLoad, onGroupUnload, onGroupDelete, onShowMessage,
-      groupMeta, onSetGroupTitle,
+      entries, path, loading, error, importing, refreshing, busyNames, applyingGroup,
+      notice, groupMeta, onRefresh, onImport, onToast, onAlert, onTier, onLoad, onUnload,
+      onGroupTier, onGroupLoad, onGroupUnload, onAskGroupDelete, onSetGroupTitle,
+      onDismissNotice, onDelete,
     } = props;
 
     const [query, setQuery] = useState("");
     const [expandAll, setExpandAll] = useState(null);
     const [openGroups, setOpenGroups] = useState({});
-    const [importOpen, setImportOpen] = useState(true);
-    const [importText, setImportText] = useState("");
-    const [showSample, setShowSample] = useState(false);
     const [toolPop, setToolPop] = useState("");
     const [errorOpen, setErrorOpen] = useState("");
-    const [confirmDelete, setConfirmDelete] = useState("");
-    const [confirmGroupDelete, setConfirmGroupDelete] = useState("");
     const [copied, setCopied] = useState("");
+    const [menuFor, setMenuFor] = useState("");
     const [editingTitle, setEditingTitle] = useState("");
     const [titleDraft, setTitleDraft] = useState("");
-    const importTaRef = useRef(null);
+    const [importOpen, setImportOpen] = useState(false);
+    const [importText, setImportText] = useState("");
+    const [showSample, setShowSample] = useState(false);
+    const [importResult, setImportResult] = useState(null);
+    const [importError, setImportError] = useState("");
+    const [confirm, setConfirm] = useState(null);
+    const [confirmBusy, setConfirmBusy] = useState(false);
 
     const queryText = query.trim().toLowerCase();
     const visible = useMemo(() => {
@@ -493,25 +792,25 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
 
     const stats = useMemo(() => {
       let connected = 0, onlineTools = 0, eager = 0, disabled = 0;
-      for (const e of entries) {
-        const st = e.conn && e.conn.status;
-        if (st === "connected") {
+      for (const entry of entries) {
+        const status = entry.conn && entry.conn.status;
+        if (status === "connected") {
           connected++;
-          onlineTools += typeof e.conn.tools === "number" ? e.conn.tools : (e.toolCount || 0);
+          onlineTools += typeof entry.conn.tools === "number" ? entry.conn.tools : (entry.toolCount || 0);
         }
-        if (e.tier === "eager") eager++;
-        if (e.tier === "disabled") disabled++;
+        if (entry.tier === "eager") eager++;
+        if (entry.tier === "disabled") disabled++;
       }
       return { total: entries.length, connected, tools: onlineTools, eager, disabled };
     }, [entries]);
 
     // 单成员组默认展开：未显式折叠前视为打开（多成员组默认折叠）。
     const singlePrefixes = useMemo(() => {
-      const s = new Set();
+      const set = new Set();
       for (const item of visible) {
-        if (item.kind === "group" && item.members.length === 1) s.add(item.prefix);
+        if (item.kind === "group" && item.members.length === 1) set.add(item.prefix);
       }
-      return s;
+      return set;
     }, [visible]);
 
     const isOpen = (prefix) => {
@@ -525,45 +824,98 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     };
     const onToggleAll = () => setExpandAll(expandAll === true ? false : true);
 
-    const toggleTools = (entryName) => setToolPop((prev) => (prev === entryName ? "" : entryName));
-    const toggleError = (entryName) => setErrorOpen((prev) => (prev === entryName ? "" : entryName));
-
     const onCopy = async (label, text) => {
-      const ok = await copyText(text);
+      const ok = await writeClipboard(text);
       setCopied(text);
       setTimeout(() => setCopied((prev) => (prev === text ? "" : prev)), 2000);
-      if (ok) onShowMessage("ok", "已复制：" + text);
+      if (ok) onToast("已复制：" + text);
     };
 
-    const focusImport = () => {
+    const openImport = () => {
+      setImportResult(null);
+      setImportError("");
       setImportOpen(true);
-      setTimeout(() => { if (importTaRef.current) importTaRef.current.focus(); }, 50);
+    };
+
+    const runImport = async () => {
+      setImportError("");
+      setImportResult(null);
+      try {
+        const result = await onImport(importText);
+        setImportResult(result);
+        setImportText("");
+        const summary = importSummary(result);
+        if (summary.failed > 0) {
+          onAlert("导入完成，但有 " + summary.failed + " 条失败（成功 " + (summary.added + summary.updated) + " 条）：",
+            summary.rows.filter((row) => row.status === "error").map((row) => row.name + "：" + row.error));
+        } else {
+          onToast("导入完成：" + summary.title.replace("导入结果：", "") + "（写盘即生效，eager 项自动连接）");
+        }
+      } catch (err) {
+        setImportError(errText(err));
+      }
+    };
+
+    const exportNow = () => {
+      downloadJson(exportPayload(entries), "mcpServers.json");
+      onToast("已导出 mcpServers.json（共 " + entries.length + " 个服务）");
+    };
+
+    const runConfirm = async () => {
+      if (!confirm) return;
+      setConfirmBusy(true);
+      try {
+        if (confirm.kind === "group") await onAskGroupDelete(confirm.prefix, confirm.members);
+        else await onDelete(confirm.name);
+        setConfirm(null);
+      } finally {
+        setConfirmBusy(false);
+      }
     };
 
     const rowOpts = {
-      busyNames, applyingGroup,
-      toolPop, errorOpen, confirmDelete, confirmGroupDelete, copied,
-      onTier, onDelete, onLoad, onUnload,
-      onToggleTools: toggleTools,
-      onToggleError: toggleError,
-      onCopy,
-      onAskDelete: setConfirmDelete,
-      onCancelDelete: () => setConfirmDelete(""),
-      isOpen,
-      onToggleGroup,
-      onGroupTier: props.onGroupTier,
-      onGroupLoad: props.onGroupLoad,
-      onGroupUnload: props.onGroupUnload,
-      onAskGroupDelete: setConfirmGroupDelete,
-      onCancelGroupDelete: () => setConfirmGroupDelete(""),
-      onGroupDelete: props.onGroupDelete,
+      busyNames: busyNames || {},
+      applyingGroup: applyingGroup || "",
+      toolPop,
+      errorOpen,
+      copied,
       groupMeta: groupMeta || {},
       editingTitle,
       titleDraft,
+      menuFor,
+      onTier,
+      onLoad,
+      onUnload,
+      onToggleTools: (entryName) => setToolPop((prev) => (prev === entryName ? "" : entryName)),
+      onToggleError: (entryName) => setErrorOpen((prev) => (prev === entryName ? "" : entryName)),
+      onCopy,
+      onAskDelete: (entry) => setConfirm({ kind: "row", name: entry.name }),
+      isOpen,
+      onToggleGroup,
+      onGroupTier,
+      onGroupLoad,
+      onGroupUnload,
+      onCloseMenu: () => setMenuFor(""),
+      onToggleMenu: (prefix) => setMenuFor((prev) => (prev === prefix ? "" : prefix)),
+      onGroupMenu: (prefix, members, id) => {
+        setMenuFor("");
+        if (id === "rename") {
+          const current = groupMeta && groupMeta[prefix] && groupMeta[prefix].title ? String(groupMeta[prefix].title) : "";
+          setEditingTitle(prefix);
+          setTitleDraft(current);
+        } else if (id === "copy") {
+          onCopy("mcp__" + prefix + "__*", "mcp__" + prefix + "__*");
+        } else if (id === "unload") {
+          onGroupUnload(prefix, members);
+        } else if (id === "delete") {
+          const meta = groupMeta && groupMeta[prefix];
+          setConfirm({ kind: "group", prefix, label: meta && meta.title ? String(meta.title) : vendorLabel(prefix), members });
+        }
+      },
       onEditTitle: (prefix) => {
-        const cur = groupMeta && groupMeta[prefix] && groupMeta[prefix].title ? String(groupMeta[prefix].title) : "";
+        const current = groupMeta && groupMeta[prefix] && groupMeta[prefix].title ? String(groupMeta[prefix].title) : "";
         setEditingTitle(prefix);
-        setTitleDraft(cur);
+        setTitleDraft(current);
       },
       onTitleDraft: setTitleDraft,
       onSaveTitle: (prefix) => {
@@ -575,120 +927,101 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
 
     const parts = [];
 
-    // 顶栏
-    parts.push(h("div", { className: "mpm-head", key: "hd" }, [
-      h("div", { key: "t" }, [
-        h("h2", { className: "mpm-title", key: "t" }, "MCP 服务"),
-        h("p", { className: "mpm-sub", key: "s" }, "管理已注册的 MCP 服务器：粘贴配置导入、分组设置档位；连接后工具以 mcp__<名称>__<工具> 供 AI 调用。"),
-      ]),
-      h("div", { className: "mpm-head-actions", key: "a" }, [
-        h("button", { type: "button", className: "mpm-btn", key: "rf", onClick: onRefresh, disabled: refreshing || loading, title: "重新读取注册表" },
-          refreshing || loading ? "刷新中…" : "↻ 刷新"),
-        h("button", {
-          type: "button", className: "mpm-btn", key: "ex",
-          disabled: entries.length === 0,
-          title: "把当前注册表导出为 mcpServers JSON（下载文件）",
-          onClick: () => {
-            downloadJson(exportPayload(entries), "mcpServers.json");
-            onShowMessage("ok", "已导出 mcpServers.json（共 " + entries.length + " 个服务）。");
-          },
-        }, "导出配置"),
-      ]),
+    parts.push(h("h2", { className: "mpm-title", key: "t" }, "MCP 服务"));
+    parts.push(h("p", { className: "mpm-intro", key: "i" },
+      "管理已注册的 MCP 服务器：粘贴配置导入、分组设置档位；连接后工具以 mcp__<名称>__<工具> 供 AI 调用。"));
+
+    parts.push(h("div", { className: "mpm-toolbar", key: "tb" }, [
+      h(SearchField, { key: "s", value: query, onChange: setQuery }),
+      h(Button, {
+        key: "r", size: "sm", variant: "outline",
+        icon: h(IconRefreshOutline16, { size: 14 }),
+        disabled: refreshing || loading,
+        onClick: onRefresh,
+      }, refreshing || loading ? "刷新中…" : "刷新"),
+      h(Button, {
+        key: "e", size: "sm", variant: "outline",
+        icon: h(IconDownloadOutline16, { size: 14 }),
+        disabled: entries.length === 0,
+        title: "把当前注册表导出为 mcpServers JSON（下载文件）",
+        onClick: exportNow,
+      }, "导出"),
+      h(Button, {
+        key: "i", size: "sm", variant: "primary",
+        icon: h(IconPlusOutline16, { size: 14 }),
+        onClick: openImport,
+      }, "导入配置"),
     ]));
 
-    // 统计条
-    parts.push(h("div", { className: "mpm-stats", key: "st" }, [
-      h("span", { className: "mpm-stat", key: "a" }, [h("b", { key: "v" }, String(stats.total)), h("span", { key: "l" }, "个服务")]),
-      h("span", { className: "mpm-stat ok", key: "b" }, [h("b", { key: "v" }, String(stats.connected)), h("span", { key: "l" }, "已连接")]),
-      h("span", { className: "mpm-stat brand", key: "c" }, [h("b", { key: "v" }, String(stats.tools)), h("span", { key: "l" }, "个在线工具")]),
-      h("span", { className: "mpm-stat eager", key: "d" }, [h("b", { key: "v" }, String(stats.eager)), h("span", { key: "l" }, "常驻")]),
-      stats.disabled > 0 ? h("span", { className: "mpm-stat off", key: "e" }, [h("b", { key: "v" }, String(stats.disabled)), h("span", { key: "l" }, "停用")]) : null,
-    ]));
-
-    // 工具条：搜索 + 全部展开/收起
-    parts.push(h("div", { className: "mpm-bar", key: "bar" }, [
-      h("label", { className: "mpm-search", key: "s" }, [
-        h("span", { className: "mpm-search-ic", key: "i" }, "⌕"),
-        h("input", {
-          key: "in", type: "search",
-          placeholder: "搜索名称 / 端点 / 工具…",
-          value: query,
-          onChange: (event) => setQuery(event.target.value),
-        }),
-        query !== "" ? h("button", { type: "button", className: "mpm-icbtn", key: "x", onClick: () => setQuery(""), "aria-label": "清空搜索" }, "✕") : null,
-      ]),
-      h("button", { type: "button", className: "mpm-btn", key: "exp", onClick: onToggleAll, disabled: entries.length === 0 },
-        expandAll === true ? "全部收起" : "全部展开"),
-    ]));
-
-    // 消息
-    parts.push(h(MessageBanner, { key: "msg", message, onDismiss: onDismissMessage }));
-
-    if (error) parts.push(h("div", { className: "mpm-msg err", key: "e" }, [
-      h("span", { className: "mpm-msg-icon", key: "i" }, "⚠"),
-      h("span", { className: "mpm-msg-text", key: "t" }, error),
-    ]));
-
-    // 导入卡
-    parts.push(h(ImportCard, {
-      key: "imp",
-      open: importOpen,
-      onOpen: () => setImportOpen(true),
-      onClose: () => setImportOpen(false),
-      text: importText,
-      onText: setImportText,
-      importing,
-      onImport: () => onImport(importText),
-      onClear: () => setImportText(""),
-      onRefresh,
-      refreshing: refreshing || loading,
-      showSample,
-      onToggleSample: () => setShowSample((prev) => !prev),
-      taRef: importTaRef,
+    parts.push(h(StatsLine, {
+      key: "st", stats, expandAll, disabled: entries.length === 0 || loading, onToggleAll,
     }));
 
-    // 服务列表
-    parts.push(h("div", { className: "mpm-sec-line", key: "ls" }, [
-      h("span", { className: "mpm-sec", key: "t" }, "已注册的 MCP 服务"),
-      entries.length > 0 ? h("span", { className: "mpm-count", key: "c" }, String(entries.length)) : null,
-      query !== "" && visible.length === 0 && entries.length > 0
-        ? h("button", { type: "button", className: "mpm-link", key: "clr", onClick: () => setQuery("") }, "清空搜索") : null,
+    if (notice && notice.kind === "ok") {
+      parts.push(h(Toast, {
+        key: "toast-" + notice.seq,
+        text: notice.text,
+        icon: h(IconCheckOutline16, { size: 16 }),
+        onDone: onDismissNotice,
+      }));
+    }
+    if (notice && notice.kind === "err") {
+      parts.push(h(NoticeAlert, {
+        key: "alert", text: notice.text, details: notice.details, onDismiss: onDismissNotice,
+      }));
+    }
+    if (error) {
+      parts.push(h(NoticeAlert, { key: "err", text: error }));
+    }
+
+    parts.push(h("div", { className: "mpm-secline", key: "sl" }, [
+      h("span", { className: "mpm-sectitle", key: "t" }, "已注册的 MCP 服务"),
+      query !== "" && entries.length > 0
+        ? h("span", { className: "mpm-status", key: "s" }, "匹配 " + visible.length + " / " + stats.total)
+        : null,
     ]));
 
     if (loading) {
-      parts.push(h("div", { className: "mpm-skels", key: "sk" }, [0, 1, 2].map((i) => h("div", { className: "mpm-skel", key: i }))));
+      parts.push(h(SkeletonList, { key: "sk" }));
     } else if (entries.length === 0) {
-      parts.push(h("div", { className: "mpm-card mpm-empty", key: "em" }, [
-        h("div", { className: "mpm-empty-ic", key: "i" }, "🔌"),
-        h("div", { className: "mpm-empty-title", key: "t" }, "还没有 MCP 服务"),
-        h("div", { className: "mpm-empty-sub", key: "s" }, "把服务商给的 mcpServers 配置粘贴到上方导入区，即可开始管理。"),
-        h("button", { type: "button", className: "mpm-btn primary", key: "b", onClick: focusImport }, "粘贴配置并导入 →"),
-      ]));
+      parts.push(h(EmptyState, { key: "em", onImport: openImport }));
     } else if (visible.length === 0) {
-      parts.push(h("div", { className: "mpm-card mpm-empty small", key: "nf" }, [
-        h("span", { className: "mpm-empty-ic", key: "i" }, "⌕"),
-        h("div", { className: "mpm-empty-title", key: "t" }, "没有匹配的服务"),
-        h("div", { className: "mpm-empty-sub", key: "s" }, "换个关键词试试，或清空搜索。"),
-      ]));
+      parts.push(h("p", { className: "mpm-status", key: "nf" }, "没有匹配的服务：换个关键词试试，或清空搜索框。"));
     } else {
       for (const item of visible) {
-        if (item.kind === "group") {
-          parts.push(groupCard(item.prefix, item.members, rowOpts));
-        } else {
-          const entry = item.entry;
-          const kids = [serviceRow(entry, null, { ...rowOpts })];
-          if (rowOpts.toolPop === entry.name) kids.push(toolStrip(entry, rowOpts));
-          parts.push(h("div", { className: "mpm-card mpm-single", key: "s-" + entry.name }, kids));
-        }
+        parts.push(item.kind === "group"
+          ? h(GroupCard, { key: "g-" + item.prefix, prefix: item.prefix, members: item.members, opts: rowOpts })
+          : h(SingleCard, { key: "s-" + item.entry.name, entry: item.entry, opts: rowOpts }));
       }
     }
 
-    // 页脚：注册表路径
-    parts.push(h("div", { className: "mpm-foot", key: "ft" }, [
-      "注册表：", h("code", { key: "p" }, path || "…"),
-    ]));
+    parts.push(h("p", { className: "mpm-foot", key: "ft" }, ["注册表：", h("code", { key: "c" }, path || "…")]));
 
-    return h("div", { className: "mpm-wrap" }, parts);
+    parts.push(h(ImportDialog, {
+      key: "imp",
+      open: importOpen,
+      onClose: () => setImportOpen(false),
+      text: importText,
+      onText: setImportText,
+      onImport: runImport,
+      importing,
+      refreshing: refreshing || loading,
+      onRefresh,
+      showSample,
+      onToggleSample: () => setShowSample((prev) => !prev),
+      result: importResult,
+      error: importError,
+    }));
+
+    parts.push(h(ConfirmDialog, {
+      key: "cfm",
+      confirm,
+      busy: confirmBusy,
+      onCancel: () => { setConfirm(null); },
+      onConfirm: runConfirm,
+    }));
+
+    return h("div", { className: "mpm-section" }, parts);
   }
 
   // ── 数据层：拉取 + 动作（state 挂这里，ManagerView 只管渲染）────────────
@@ -701,7 +1034,8 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     const [importing, setImporting] = useState(false);
     const [applyingGroup, setApplyingGroup] = useState("");
     const [busyNames, setBusyNames] = useState({});
-    const [message, setMessage] = useState(null);
+    const [notice, setNotice] = useState(null);
+    const noticeSeq = useRef(0);
 
     const refresh = useCallback(async (silent) => {
       if (!silent) setLoading(true);
@@ -710,10 +1044,9 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
         const data = await getJson("/mcp-panel/list");
         setPath(String(data.path || ""));
         setEntries(Array.isArray(data.entries) ? data.entries : []);
-        const meta = data.groupMeta && typeof data.groupMeta === "object" ? data.groupMeta : {};
-        setGroupsMeta(meta);
+        setGroupsMeta(data.groupMeta && typeof data.groupMeta === "object" ? data.groupMeta : {});
       } catch (err) {
-        setError("读取注册表失败: " + errText(err));
+        setError("读取注册表失败：" + errText(err));
       } finally {
         setLoading(false);
       }
@@ -721,7 +1054,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
 
     useEffect(() => { refresh(); }, [refresh]);
 
-    // 轻量轮询：连接状态 / 档位 变化自动同步（仅页面可见时）
+    // 轻量轮询：连接状态 / 档位 变化自动同步（仅页面可见时）。
     useEffect(() => {
       if (typeof document === "undefined") return undefined;
       const timer = setInterval(async () => {
@@ -729,63 +1062,52 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
         try {
           const data = await getJson("/mcp-panel/status");
           const map = {};
-          for (const s of data.entries || []) {
-            if (s && s.name) map[s.name] = { tier: s.tier, conn: s.conn };
+          for (const row of data.entries || []) {
+            if (row && row.name) map[row.name] = { tier: row.tier, conn: row.conn };
           }
           setEntries((prev) => prev.map((entry) => {
-            const m = map[entry.name];
-            return m ? { ...entry, tier: m.tier, conn: m.conn } : entry;
+            const live = map[entry.name];
+            return live ? { ...entry, tier: live.tier, conn: live.conn } : entry;
           }));
         } catch { /* 轮询失败静默，下轮再试 */ }
       }, 5000);
       return () => clearInterval(timer);
     }, []);
 
-    // ok 类消息自动消失
-    useEffect(() => {
-      if (!message || message.kind !== "ok") return undefined;
-      const t = setTimeout(() => setMessage(null), 6000);
-      return () => clearTimeout(t);
-    }, [message]);
-
-    function showMessage(kind, text) {
-      setMessage({ kind, text });
+    function showToast(text) {
+      noticeSeq.current += 1;
+      setNotice({ kind: "ok", seq: noticeSeq.current, text });
     }
 
-    // 组显示名：自定义标题优先，否则厂商自动名（用于消息与组头）。
+    function showError(text, details) {
+      noticeSeq.current += 1;
+      setNotice({ kind: "err", seq: noticeSeq.current, text, details });
+    }
+
     function groupLabel(prefix) {
-      const m = groupsMeta && groupsMeta[prefix];
-      return m && m.title ? String(m.title) : vendorLabel(prefix);
+      const meta = groupsMeta && groupsMeta[prefix];
+      return meta && meta.title ? String(meta.title) : vendorLabel(prefix);
     }
 
     async function onSetGroupTitle(prefix, title) {
       const clean = String(title === undefined || title === null ? "" : title).trim().slice(0, 40);
       try {
         await postJson("/mcp-panel/save", { action: "setGroupTitle", prefix, title: clean });
-        showMessage("ok", clean ? "「" + clean + "」组名已保存。" : "已恢复为自动组名。");
+        showToast(clean ? "「" + clean + "」组名已保存" : "已恢复为自动组名");
         refresh(true);
       } catch (err) {
-        showMessage("err", "修改组名失败: " + errText(err));
+        showError("修改组名失败：" + errText(err));
       }
     }
 
+    // 返回导入结果供弹层展示；HTTP 失败直接抛出，由弹层就地提示。
     async function onImport(text) {
-      if (!text || !text.trim()) {
-        showMessage("err", "请先粘贴 MCP 配置 JSON。");
-        return;
-      }
+      if (!text || !text.trim()) throw new Error("请先粘贴 MCP 配置 JSON");
       setImporting(true);
-      setMessage(null);
       try {
         const res = await postJson("/mcp-panel/import", { text });
-        const lines = (res.rows || []).map((row) => {
-          if (row.status === "error") return "✗ " + row.name + "：" + row.error;
-          return "✓ " + row.name + "（" + (row.status === "added" ? "新增" : "更新") + "）";
-        });
-        showMessage("ok", "导入完成：" + res.entryCount + " 个服务。\n" + lines.join("\n") + "\n写盘即生效：eager 项自动连接，其余可点“连接”。");
         refresh(true);
-      } catch (err) {
-        showMessage("err", "导入失败: " + errText(err));
+        return { entryCount: res.entryCount, rows: Array.isArray(res.rows) ? res.rows : [] };
       } finally {
         setImporting(false);
       }
@@ -798,55 +1120,73 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     async function onTier(entryName, tier) {
       try {
         await applyTier(entryName, tier);
-        showMessage("ok", "「" + entryName + "」档位已设为 " + TIER_TEXT[tier] + "。");
+        showToast("「" + entryName + "」档位已设为 " + TIER_TEXT[tier]);
         refresh(true);
       } catch (err) {
-        showMessage("err", "修改出错: " + errText(err));
+        showError("修改档位失败：" + errText(err));
       }
     }
 
     async function onGroupTier(prefix, members, tier) {
       setApplyingGroup(prefix);
-      setMessage(null);
-      const ok = [];
-      const bad = [];
+      const failed = [];
+      let ok = 0;
       try {
         for (const member of members) {
           try {
             await applyTier(member.name, tier);
-            ok.push(member.name);
+            ok += 1;
           } catch (err) {
-            bad.push(member.name + ": " + errText(err));
+            failed.push(member.name + "：" + errText(err));
           }
         }
       } finally {
         setApplyingGroup("");
       }
       const label = groupLabel(prefix);
-      if (bad.length > 0) showMessage("err", "「" + label + "」整体档位部分失败：\n" + bad.join("\n"));
-      else showMessage("ok", "「" + label + "」整体档位已设为 " + TIER_TEXT[tier] + "（共 " + ok.length + " 个服务）。");
+      if (failed.length > 0) showError("「" + label + "」整组档位部分失败（成功 " + ok + " 条）：", failed);
+      else showToast("「" + label + "」整组档位已设为 " + TIER_TEXT[tier] + "（" + ok + " 个服务）");
       refresh(true);
     }
 
     async function onDelete(entryName) {
       try {
         await postJson("/mcp-panel/save", { action: "delete", name: entryName });
-        showMessage("ok", "已删除「" + entryName + "」（已连接的会立即断开）。");
+        showToast("已删除「" + entryName + "」（已连接的已立即断开）");
         refresh(true);
       } catch (err) {
-        showMessage("err", "删除失败: " + errText(err));
+        showError("删除失败：" + errText(err));
       }
+    }
+
+    async function onGroupDelete(prefix, members) {
+      const failed = [];
+      let ok = 0;
+      for (const member of members) {
+        try {
+          await postJson("/mcp-panel/save", { action: "delete", name: member.name });
+          ok += 1;
+        } catch (err) {
+          failed.push(member.name + "：" + errText(err));
+        }
+      }
+      const label = groupLabel(prefix);
+      if (failed.length > 0) showError("「" + label + "」删除部分失败：", failed);
+      else showToast("已删除「" + label + "」整组（" + ok + " 个服务）");
+      try {
+        await postJson("/mcp-panel/save", { action: "setGroupTitle", prefix, title: "" });
+      } catch { /* 元数据清理失败不影响删除结果 */ }
+      refresh(true);
     }
 
     async function onLoad(entryName) {
       setBusyNames((prev) => ({ ...prev, [entryName]: true }));
-      setMessage(null);
       try {
         const res = await postJson("/mcp-panel/load", { name: entryName });
-        showMessage("ok", "「" + entryName + "」已连接，注册 " + res.tools + " 个工具。新会话/子代理可直接调用 mcp__" + entryName + "__*；已开始的会话从新 step 起可见。");
+        showToast("「" + entryName + "」已连接，注册 " + res.tools + " 个工具（新会话可直接调用）");
         refresh(true);
       } catch (err) {
-        showMessage("err", "「" + entryName + "」连接失败: " + errText(err));
+        showError("「" + entryName + "」连接失败：" + errText(err));
         refresh(true);
       } finally {
         setBusyNames((prev) => { const next = { ...prev }; delete next[entryName]; return next; });
@@ -857,10 +1197,10 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       setBusyNames((prev) => ({ ...prev, [entryName]: true }));
       try {
         await postJson("/mcp-panel/unload", { name: entryName });
-        showMessage("ok", "「" + entryName + "」已断开，工具已注销。");
+        showToast("「" + entryName + "」已断开，工具已注销");
         refresh(true);
       } catch (err) {
-        showMessage("err", "断开失败: " + errText(err));
+        showError("断开失败：" + errText(err));
       } finally {
         setBusyNames((prev) => { const next = { ...prev }; delete next[entryName]; return next; });
       }
@@ -868,234 +1208,200 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
 
     async function onGroupLoad(prefix, members) {
       setApplyingGroup(prefix);
-      setMessage(null);
-      const ok = [];
-      const bad = [];
+      const failed = [];
+      let ok = 0;
       for (const member of members) {
         try {
           await postJson("/mcp-panel/load", { name: member.name });
-          ok.push(member.name);
+          ok += 1;
         } catch (err) {
-          bad.push(member.name + ": " + errText(err));
+          failed.push(member.name + "：" + errText(err));
         }
       }
       setApplyingGroup("");
       const label = groupLabel(prefix);
-      if (bad.length > 0) showMessage("err", "「" + label + "」部分连接失败：\n" + bad.join("\n"));
-      else showMessage("ok", "「" + label + "」全部连接成功（" + ok.length + " 个服务）。");
+      if (failed.length > 0) showError("「" + label + "」部分连接失败（成功 " + ok + " 条）：", failed);
+      else showToast("「" + label + "」全部连接成功（" + ok + " 个服务）");
       refresh(true);
     }
 
     async function onGroupUnload(prefix, members) {
       setApplyingGroup(prefix);
-      setMessage(null);
       for (const member of members) {
         try {
           await postJson("/mcp-panel/unload", { name: member.name });
         } catch { /* 忽略单条断开失败 */ }
       }
       setApplyingGroup("");
-      showMessage("ok", "「" + groupLabel(prefix) + "」已全部断开。");
-      refresh(true);
-    }
-
-    async function onGroupDelete(prefix, members) {
-      setMessage(null);
-      const ok = [];
-      const bad = [];
-      for (const member of members) {
-        try {
-          await postJson("/mcp-panel/save", { action: "delete", name: member.name });
-          ok.push(member.name);
-        } catch (err) {
-          bad.push(member.name + ": " + errText(err));
-        }
-      }
-      const label = groupLabel(prefix);
-      if (bad.length > 0) showMessage("err", "「" + label + "」删除部分失败：\n" + bad.join("\n"));
-      else showMessage("ok", "已删除「" + label + "」整组（" + ok.length + " 个服务，已连接的已立即断开）。");
-      // 顺带清理自定义组名元数据（失败不影响删除结果）。
-      try {
-        await postJson("/mcp-panel/save", { action: "setGroupTitle", prefix, title: "" });
-      } catch {
-        /* 忽略元数据清理失败 */
-      }
+      showToast("「" + groupLabel(prefix) + "」已全部断开");
       refresh(true);
     }
 
     return h(ManagerView, {
-      entries, path, loading, error,
-      importing,
+      entries, path, loading, error, importing,
       refreshing: loading,
-      busyNames, applyingGroup, message,
-      onDismissMessage: () => setMessage(null),
+      busyNames, applyingGroup, notice,
+      groupMeta: groupsMeta,
       onRefresh: () => refresh(),
       onImport,
       onTier, onDelete, onLoad, onUnload,
-      onGroupTier, onGroupLoad, onGroupUnload, onGroupDelete,
-      onShowMessage: showMessage,
-      groupMeta: groupsMeta,
+      onGroupTier, onGroupLoad, onGroupUnload,
+      onAskGroupDelete: onGroupDelete,
       onSetGroupTitle,
+      onToast: showToast,
+      onAlert: showError,
+      onDismissNotice: () => setNotice(null),
     });
   }
 
-  // ── CSS（主题变量随产品明暗主题自动适配）────────────────────────────────
+  // ── CSS（产品设置页语言；只用 --dsw-alias-* 语义 token）──────────────────
   const CSS = [
-    ".mpm-wrap{display:flex;flex-direction:column;gap:12px;padding:6px 2px 28px;max-width:1020px;min-width:0;}",
-    // 顶栏
-    ".mpm-head{display:flex;align-items:flex-start;justify-content:space-between;gap:12px;flex-wrap:wrap;}",
-    ".mpm-title{font-size:18px;font-weight:700;line-height:1.35;color:var(--dsw-alias-label-primary);margin:0;}",
-    ".mpm-sub{font-size:12px;line-height:1.65;color:var(--dsw-alias-label-secondary);margin:3px 0 0;max-width:640px;}",
-    ".mpm-head-actions{display:flex;gap:8px;align-items:center;flex-wrap:wrap;}",
-    // 统计条
-    ".mpm-stats{display:flex;flex-wrap:wrap;gap:8px;}",
-    ".mpm-stat{display:inline-flex;align-items:center;gap:6px;font-size:12px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l1);border-radius:9px;padding:4px 10px;}",
-    ".mpm-stat b{color:var(--dsw-alias-label-primary);font-weight:700;font-variant-numeric:tabular-nums;font-size:13px;}",
-    ".mpm-stat.ok b{color:var(--dsw-alias-state-success-primary);}",
-    ".mpm-stat.brand b{color:var(--dsw-alias-brand-primary);}",
-    ".mpm-stat.eager b{color:var(--dsw-alias-state-warn-primary);}",
-    ".mpm-stat.off b{color:var(--dsw-alias-label-tertiary);}",
-    // 工具条
-    ".mpm-bar{display:flex;flex-wrap:wrap;gap:8px;align-items:center;}",
-    ".mpm-search{flex:1 1 220px;min-width:180px;display:flex;align-items:center;gap:6px;background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:9px;padding:0 8px;color:var(--dsw-alias-label-secondary);transition:border-color .12s;}",
-    ".mpm-search:focus-within{border-color:var(--dsw-alias-brand-primary);}",
-    ".mpm-search input{flex:1 1 auto;min-width:0;border:none;outline:none;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;padding:6px 0;}",
+    // 版式：设置页约定（max-width 760 / 列间距 12 / h2 18-600 / 13px 三级色导语）
+    ".mpm-section{display:flex;flex-direction:column;gap:12px;width:100%;max-width:760px;color:var(--dsw-alias-label-primary);}",
+    ".mpm-title{margin:0;font-size:18px;line-height:26px;font-weight:600;}",
+    ".mpm-intro{margin:0;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);}",
+    ".mpm-spacer{flex:1 1 auto;min-width:0;}",
+    // 顶栏：搜索 + 动作（搜索字段沿用产品设置页搜索尺寸）
+    ".mpm-toolbar{display:flex;flex-wrap:wrap;align-items:center;gap:8px;}",
+    ".mpm-search{position:relative;display:flex;flex:1 1 220px;align-items:center;min-width:180px;color:var(--dsw-alias-label-tertiary);}",
+    ".mpm-search>svg{position:absolute;left:12px;pointer-events:none;}",
+    ".mpm-search input{width:100%;height:36px;box-sizing:border-box;border:0.5px solid var(--dsw-alias-border-l4);border-radius:10px;padding:0 12px 0 36px;outline:none;background:var(--dsw-alias-bg-layer-1);color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;line-height:20px;}",
     ".mpm-search input::placeholder{color:var(--dsw-alias-label-tertiary);}",
-    ".mpm-search-ic{font-size:13px;line-height:1;}",
-    ".mpm-icbtn{border:none;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:11px;padding:2px 4px;border-radius:5px;}",
-    ".mpm-icbtn:hover{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-interactive-bg-hover);}",
-    // 按钮
-    ".mpm-btn{font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:transparent;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:4px 10px;cursor:pointer;white-space:nowrap;transition:border-color .12s,color .12s,background .12s;}",
-    ".mpm-btn:hover:not(:disabled){border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);}",
-    ".mpm-btn.primary{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);}",
-    ".mpm-btn.primary:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-brand-primary) 12%,transparent);}",
-    ".mpm-btn.danger{color:var(--dsw-alias-state-error-primary);border-color:var(--dsw-alias-state-error-primary);}",
-    ".mpm-btn.danger:hover:not(:disabled){background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);border-color:var(--dsw-alias-state-error-primary);}",
-    ".mpm-btn.tiny{padding:1px 7px;font-size:11px;border-radius:6px;}",
-    ".mpm-btn:disabled{opacity:.45;cursor:default;}",
-    ".mpm-link{border:none;background:transparent;color:var(--dsw-alias-brand-primary);cursor:pointer;font:inherit;font-size:12px;padding:2px 6px;border-radius:6px;}",
-    ".mpm-link:hover{background:color-mix(in srgb,var(--dsw-alias-brand-primary) 10%,transparent);}",
-    // 段式档位
-    ".mpm-seg{display:inline-flex;border:1px solid var(--dsw-alias-border-l2);border-radius:8px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);}",
-    ".mpm-seg-btn{font:inherit;font-size:11px;padding:3px 9px;color:var(--dsw-alias-label-secondary);background:transparent;border:none;border-right:1px solid var(--dsw-alias-border-l1);cursor:pointer;transition:background .12s,color .12s;}",
-    ".mpm-seg-btn:last-child{border-right:none;}",
-    ".mpm-seg-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}",
-    ".mpm-seg-btn.on{background:var(--dsw-alias-brand-primary);color:var(--dsw-alias-label-primary-inverted,#fff);font-weight:600;}",
-    ".mpm-seg-btn:disabled{opacity:.45;cursor:default;}",
-    // 状态徽章
-    ".mpm-badge{display:inline-flex;align-items:center;gap:5px;font-size:11px;font-weight:600;border-radius:999px;padding:2px 9px;border:1px solid transparent;white-space:nowrap;max-width:132px;}",
-    ".mpm-btxt{overflow:hidden;text-overflow:ellipsis;}",
-    ".mpm-badge.connected{color:var(--dsw-alias-state-success-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent);}",
-    ".mpm-badge.connecting{color:var(--dsw-alias-state-warn-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 10%,transparent);}",
-    ".mpm-badge.error{color:var(--dsw-alias-state-error-primary);border-color:color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);}",
-    ".mpm-badge.off{color:var(--dsw-alias-label-tertiary);border-color:var(--dsw-alias-border-l2);}",
-    ".mpm-bdot{width:7px;height:7px;border-radius:50%;display:inline-block;flex:none;}",
-    ".mpm-bdot.connected{background:var(--dsw-alias-state-success-primary);}",
-    ".mpm-bdot.connecting{background:var(--dsw-alias-state-warn-primary);animation:mpm-pulse 1s ease-in-out infinite;}",
-    ".mpm-bdot.error{background:var(--dsw-alias-state-error-primary);}",
-    ".mpm-bdot.off{background:var(--dsw-alias-label-tertiary);}",
-    ".mpm-blink{border:none;background:transparent;color:inherit;cursor:pointer;font-size:10px;padding:0 2px;}",
-    // 卡片 / 分区
-    ".mpm-card{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;padding:12px 14px;background:var(--dsw-alias-bg-layer-1);}",
-    ".mpm-sec-line{display:flex;align-items:center;gap:8px;padding:2px 0;}",
-    ".mpm-sec{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);}",
-    ".mpm-count{font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-interactive-bg-hover);border-radius:999px;padding:1px 8px;font-variant-numeric:tabular-nums;}",
-    ".mpm-cap{font-size:12px;color:var(--dsw-alias-label-secondary);padding:0 2px 6px;}",
-    ".mpm-cap.muted{color:var(--dsw-alias-label-tertiary);}",
-    ".mpm-cardhead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px;}",
-    ".mpm-import-closed{display:flex;flex-direction:column;align-items:flex-start;gap:4px;}",
-    ".mpm-sec-btn{border:none;background:transparent;color:var(--dsw-alias-brand-primary);font:inherit;font-size:13px;font-weight:600;cursor:pointer;padding:0;text-align:left;}",
-    ".mpm-sec-btn:hover{text-decoration:underline;}",
-    ".mpm-toolbar{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}",
-    // 导入 textarea / 示例
-    ".mpm-import{font:inherit;font-size:12px;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-border-l2);border-radius:8px;padding:6px 8px;}",
-    ".mpm-import{font-family:ui-monospace,Consolas,'Courier New',monospace;resize:vertical;box-sizing:border-box;width:100%;}",
-    ".mpm-import:focus{outline:none;border-color:var(--dsw-alias-brand-primary);}",
-    ".mpm-sample{font-family:ui-monospace,Consolas,'Courier New',monospace;font-size:11px;line-height:1.6;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-markdown-code-block,var(--dsw-alias-bg-layer-1));border:1px solid var(--dsw-alias-border-l1);border-radius:8px;padding:8px 10px;white-space:pre-wrap;max-height:200px;overflow:auto;margin:0 0 8px;}",
-    // 组卡
-    ".mpm-group{border:1px solid var(--dsw-alias-border-l1);border-radius:12px;overflow:hidden;background:var(--dsw-alias-bg-layer-1);}",
-    ".mpm-ghead{display:flex;flex-wrap:wrap;gap:10px 12px;align-items:center;padding:12px 14px;}",
-    ".mpm-gdot{width:10px;height:10px;border-radius:50%;flex:none;background:var(--dsw-alias-label-tertiary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-label-tertiary) 16%,transparent);transition:background .15s;}",
-    ".mpm-gdot.connected{background:var(--dsw-alias-state-success-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-success-primary) 20%,transparent);}",
-    ".mpm-gdot.connecting{background:var(--dsw-alias-state-warn-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-warn-primary) 20%,transparent);animation:mpm-pulse 1s ease-in-out infinite;}",
-    ".mpm-gdot.error{background:var(--dsw-alias-state-error-primary);box-shadow:0 0 0 3px color-mix(in srgb,var(--dsw-alias-state-error-primary) 20%,transparent);}",
-    ".mpm-ginfo{display:flex;flex-direction:column;gap:2px;min-width:190px;flex:1 1 240px;}",
-    ".mpm-gtitle-row{display:flex;align-items:center;gap:5px;min-width:0;}",
-    ".mpm-gtitle{font-size:14px;font-weight:700;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
-    ".mpm-gedit-btn{border:none;background:transparent;color:var(--dsw-alias-label-tertiary);cursor:pointer;font-size:11px;line-height:1;padding:2px 4px;border-radius:5px;flex:none;}",
-    ".mpm-gedit-btn:hover{color:var(--dsw-alias-brand-primary);background:var(--dsw-alias-interactive-bg-hover);}",
-    ".mpm-gtitle-input{font:inherit;font-size:13px;font-weight:700;color:var(--dsw-alias-label-primary);background:var(--dsw-alias-bg-layer-1);border:1px solid var(--dsw-alias-brand-primary);border-radius:6px;padding:2px 7px;width:min(260px,38vw);min-width:120px;outline:none;}",
-    ".mpm-gtitle-tip{font-size:10px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;}",
-    ".mpm-gsub{font-size:11px;color:var(--dsw-alias-label-secondary);line-height:1.5;}",
-    ".mpm-grow{flex:0 0 auto;}",
-    ".mpm-gactions{display:flex;flex-wrap:wrap;gap:6px;align-items:center;}",
-    ".mpm-members{border-top:1px solid var(--dsw-alias-border-l1);padding:2px 14px 10px;}",
-    ".mpm-scroll{overflow-x:auto;}",
-    // 行网格
-    ".mpm-grid{display:grid;grid-template-columns:minmax(150px,1.4fr) minmax(148px,190px) 128px 92px minmax(56px,auto);gap:10px;align-items:center;}",
-    ".mpm-thead{font-size:11px;color:var(--dsw-alias-label-secondary);padding:8px 2px 4px;}",
-    ".mpm-trow{padding:8px 2px;border-top:1px dashed var(--dsw-alias-border-l1);}",
-    ".mpm-trow:hover{background:var(--dsw-alias-interactive-bg-hover);}",
-    ".mpm-single{padding:8px 14px;}",
-    ".mpm-tname{display:flex;flex-direction:column;gap:2px;min-width:0;}",
-    ".mpm-tnameline{display:flex;align-items:center;gap:6px;min-width:0;flex-wrap:wrap;}",
-    ".mpm-tfull{font-weight:600;font-size:12.5px;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
-    ".mpm-tbadge{font-size:10px;line-height:1;border-radius:5px;padding:2px 5px;flex:none;}",
-    ".mpm-tbadge.cli{color:var(--dsw-alias-state-business-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-business-primary) 40%,transparent);}",
-    ".mpm-tbadge.http{color:var(--dsw-alias-brand-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-brand-primary) 40%,transparent);}",
-    ".mpm-tbadge.auth{color:var(--dsw-alias-state-warn-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-warn-primary) 40%,transparent);}",
-    ".mpm-tep{font-size:11px;color:var(--dsw-alias-label-secondary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-family:ui-monospace,Consolas,'Courier New',monospace;}",
-    ".mpm-terr{font-size:11px;color:var(--dsw-alias-state-error-primary);line-height:1.5;padding:6px 8px;margin-top:4px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent);border-radius:7px;white-space:pre-wrap;word-break:break-all;max-height:120px;overflow:auto;}",
-    ".mpm-tconnwrap{display:flex;align-items:center;gap:6px;flex-wrap:wrap;}",
-    ".mpm-ttools{min-width:0;}",
-    ".mpm-muted{color:var(--dsw-alias-label-tertiary);font-size:12px;}",
-    ".mpm-chip{display:inline-flex;align-items:center;gap:5px;font:inherit;font-size:11px;color:var(--dsw-alias-label-secondary);background:var(--dsw-alias-interactive-bg-hover);border:1px solid var(--dsw-alias-border-l1);border-radius:999px;padding:2px 9px;cursor:pointer;white-space:nowrap;}",
-    ".mpm-chip:hover{border-color:var(--dsw-alias-brand-primary);color:var(--dsw-alias-brand-primary);}",
-    ".mpm-chip-ic{font-size:11px;}",
-    ".mpm-tdel{display:flex;align-items:center;gap:5px;flex-wrap:wrap;justify-content:flex-end;min-width:0;}",
-    ".mpm-tdel.confirm{flex-direction:column;align-items:flex-end;gap:4px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 7%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 35%,transparent);border-radius:8px;padding:5px 8px;}",
-    ".mpm-tdel-btns{display:flex;gap:5px;align-items:center;}",
-    ".mpm-confirm{font-size:11px;color:var(--dsw-alias-state-error-primary);white-space:nowrap;}",
-    ".mpm-gdel.confirm{display:flex;flex-direction:column;align-items:flex-end;gap:4px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 7%,transparent);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 35%,transparent);border-radius:8px;padding:5px 8px;}",
-    ".mpm-gdel-btns{display:flex;gap:5px;align-items:center;}",
-    // 工具展开条
-    ".mpm-toolstrip{border:1px solid var(--dsw-alias-border-l2);border-radius:10px;margin:6px 2px 10px;background:var(--dsw-alias-bg-layer-2);overflow:hidden;min-width:0;}",
-    ".mpm-toolstrip-head{display:flex;flex-wrap:wrap;gap:6px 12px;align-items:center;padding:8px 10px;border-bottom:1px solid var(--dsw-alias-border-l1);min-width:0;}",
-    ".mpm-tp-title{font-size:12px;font-weight:600;color:var(--dsw-alias-label-primary);}",
-    ".mpm-tp-server{font-size:10.5px;color:var(--dsw-alias-label-tertiary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:340px;min-width:0;}",
-    ".mpm-toolstrip-grow{flex:1 1 auto;}",
-    ".mpm-tp-grid{list-style:none;margin:0;padding:6px 8px;max-height:230px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:2px 12px;}",
-    ".mpm-tp-grid li{display:flex;align-items:center;gap:8px;justify-content:space-between;padding:3px 2px;min-width:0;}",
-    ".mpm-tp-name{font-family:ui-monospace,Consolas,'Courier New',monospace;font-size:11px;color:var(--dsw-alias-label-primary);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}",
-    ".mpm-tp-empty{font-size:12px;color:var(--dsw-alias-label-secondary);padding:10px 12px;}",
-    // 细滚动条（二级横向 / 三级工具列表 / 错误详情共用）
-    ".mpm-scroll::-webkit-scrollbar,.mpm-tp-grid::-webkit-scrollbar,.mpm-terr::-webkit-scrollbar{width:8px;height:8px;}",
-    ".mpm-scroll::-webkit-scrollbar-thumb,.mpm-tp-grid::-webkit-scrollbar-thumb,.mpm-terr::-webkit-scrollbar-thumb{background:var(--dsw-alias-border-l2);border-radius:999px;}",
-    ".mpm-scroll::-webkit-scrollbar-thumb:hover,.mpm-tp-grid::-webkit-scrollbar-thumb:hover,.mpm-terr::-webkit-scrollbar-thumb:hover{background:var(--dsw-alias-brand-primary);}",
-    ".mpm-scroll::-webkit-scrollbar-corner,.mpm-tp-grid::-webkit-scrollbar-corner,.mpm-terr::-webkit-scrollbar-corner{background:transparent;}",
-    // 消息
-    ".mpm-msg{display:flex;align-items:flex-start;gap:8px;font-size:12px;line-height:1.6;padding:7px 10px;border-radius:9px;white-space:pre-wrap;word-break:break-word;}",
-    ".mpm-msg.ok{color:var(--dsw-alias-state-success-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-success-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 8%,transparent);}",
-    ".mpm-msg.err{color:var(--dsw-alias-state-error-primary);border:1px solid color-mix(in srgb,var(--dsw-alias-state-error-primary) 40%,transparent);background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent);}",
-    ".mpm-msg-icon{flex:none;line-height:1.4;}",
-    ".mpm-msg-text{flex:1 1 auto;min-width:0;}",
-    ".mpm-msg-x{border:none;background:transparent;color:inherit;cursor:pointer;font-size:11px;padding:2px;opacity:.7;}",
-    ".mpm-msg-x:hover{opacity:1;}",
-    // 空态 / 骨架
-    ".mpm-empty{display:flex;flex-direction:column;align-items:center;gap:6px;text-align:center;padding:26px 16px;}",
-    ".mpm-empty.small{padding:18px 16px;}",
-    ".mpm-empty-ic{font-size:24px;line-height:1;margin-bottom:2px;}",
-    ".mpm-empty-title{font-size:13px;font-weight:600;color:var(--dsw-alias-label-primary);}",
-    ".mpm-empty-sub{font-size:12px;color:var(--dsw-alias-label-secondary);max-width:380px;}",
-    ".mpm-skels{display:flex;flex-direction:column;gap:8px;}",
-    ".mpm-skel{height:58px;border-radius:10px;background:var(--dsw-alias-interactive-bg-hover);animation:mpm-pulse 1.2s ease-in-out infinite;}",
-    ".mpm-foot{font-size:11px;color:var(--dsw-alias-label-tertiary);}",
-    ".mpm-foot code{font-family:ui-monospace,Consolas,'Courier New',monospace;}",
-    "@keyframes mpm-pulse{0%,100%{opacity:1}50%{opacity:.45}}",
+    ".mpm-search input:focus-visible{border-color:var(--dsw-alias-state-business-primary);box-shadow:0 0 0 2px color-mix(in srgb,var(--dsw-alias-state-business-primary) 18%,transparent);}",
+    // 统计行
+    ".mpm-stats{display:flex;align-items:center;gap:8px;padding:0 2px;}",
+    ".mpm-stats-text{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);font-variant-numeric:tabular-nums;}",
+    // 分区标题（列表上方的小标题）
+    ".mpm-secline{display:flex;align-items:baseline;gap:8px;padding:4px 2px 0;}",
+    ".mpm-sectitle{font-size:13px;line-height:20px;font-weight:600;}",
+    ".mpm-status{display:inline-flex;align-items:center;gap:4px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}",
+    // 分组卡：0.5px 中性描边（不与 elevation 阴影同时出现）
+    ".mpm-group{border:0.5px solid var(--dsw-alias-border-l4);border-radius:16px;background:transparent;min-width:0;}",
+    ".mpm-ghead{display:flex;flex-wrap:wrap;align-items:center;gap:8px 10px;padding:12px 14px;}",
+    ".mpm-gid{display:flex;flex-direction:column;gap:4px;flex:1 1 260px;min-width:0;}",
+    ".mpm-gtitle-row{display:flex;align-items:center;gap:8px;min-width:0;}",
+    ".mpm-gtoggle{display:inline-flex;align-items:center;gap:8px;min-width:0;border:0;padding:0;background:transparent;color:inherit;font:inherit;text-align:left;cursor:pointer;}",
+    ".mpm-gtoggle:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;border-radius:4px;}",
+    ".mpm-chev{flex:none;color:var(--dsw-alias-label-tertiary);transform:rotate(-90deg);}",
+    ".mpm-group[data-open=\"true\"] .mpm-chev{transform:none;}",
+    ".mpm-gtitle{font-size:14px;line-height:22px;font-weight:500;color:var(--dsw-alias-label-primary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+    ".mpm-gsub{font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-variant-numeric:tabular-nums;}",
+    ".mpm-gtitle-edit{display:flex;flex-wrap:wrap;align-items:center;gap:6px;min-width:0;}",
+    ".mpm-input{width:min(240px,46vw);}",
+    ".mpm-gactions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-left:auto;}",
+    ".mpm-members{border-top:0.5px solid var(--dsw-alias-border-l2);padding:0 14px 4px;}",
+    // 成员行
+    ".mpm-item{border-bottom:0.5px solid var(--dsw-alias-border-l2);}",
+    ".mpm-item:last-child{border-bottom:0;}",
+    ".mpm-row{display:flex;flex-wrap:wrap;align-items:center;gap:8px 12px;padding:12px 0;}",
+    ".mpm-single .mpm-row{padding:12px 14px;}",
+    ".mpm-rid{display:flex;flex-direction:column;gap:2px;flex:1 1 200px;min-width:0;}",
+    ".mpm-rnameline{display:flex;align-items:center;gap:8px;min-width:0;}",
+    ".mpm-rname{font-size:14px;line-height:22px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+    ".mpm-rowtag{flex:none;padding:1px 6px;border:0.5px solid var(--dsw-alias-border-l3);border-radius:4px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-secondary);}",
+    ".mpm-rep{font-family:var(--ds-font-family-code);font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+    ".mpm-rerr{margin:4px 0 0;border-radius:8px;padding:6px 8px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent);color:var(--dsw-alias-state-error-primary);font-family:var(--ds-font-family-code);font-size:11px;line-height:17px;overflow-wrap:anywhere;white-space:pre-wrap;max-height:120px;overflow:auto;}",
+    ".mpm-ractions{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-left:auto;}",
+    // 档位 Pill 三连
+    ".mpm-tier{display:inline-flex;align-items:center;gap:4px;flex:none;}",
+    ".mpm-tier-pill{min-width:40px;justify-content:center;}",
+    ".mpm-toolpill{gap:5px;}",
+    // 图标按钮（产品 28x28 图标容器同族）
+    ".mpm-iconbtn{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;}",
+    ".mpm-iconbtn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);color:var(--dsw-alias-label-primary);}",
+    ".mpm-iconbtn:focus-visible{outline:2px solid var(--dsw-alias-state-business-primary);outline-offset:2px;}",
+    ".mpm-iconbtn:disabled{opacity:.4;cursor:not-allowed;}",
+    ".mpm-iconbtn[data-danger=\"true\"]:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger);color:var(--dsw-alias-state-error-primary);}",
+    ".mpm-hint{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);}",
+    // 工具面板（卡片展开区）
+    ".mpm-tools{margin:0 0 12px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:12px;background:var(--dsw-alias-bg-module-platform);overflow:hidden;min-width:0;}",
+    ".mpm-tools-head{display:flex;flex-wrap:wrap;align-items:center;gap:6px 10px;padding:6px 8px 6px 12px;border-bottom:0.5px solid var(--dsw-alias-border-l2);}",
+    ".mpm-tools-title{font-size:12.5px;line-height:18px;font-weight:500;}",
+    ".mpm-tools-server{font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);max-width:320px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+    ".mpm-tools-list{list-style:none;margin:0;padding:6px 8px 8px 12px;max-height:240px;overflow:auto;display:grid;grid-template-columns:repeat(auto-fill,minmax(230px,1fr));gap:2px 12px;}",
+    ".mpm-tool{display:flex;align-items:center;justify-content:space-between;gap:8px;min-width:0;}",
+    ".mpm-tool-name{font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+    ".mpm-tools-empty{margin:0;padding:10px 12px;font-size:12px;line-height:18px;color:var(--dsw-alias-label-tertiary);}",
+    // 空态 / 骨架 / 页脚
+    ".mpm-empty{display:flex;flex-direction:column;align-items:flex-start;gap:6px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:16px;padding:20px;text-align:left;}",
+    ".mpm-empty-title{margin:0;font-size:14px;line-height:22px;font-weight:500;}",
+    ".mpm-empty-sub{margin:0 0 6px;font-size:13px;line-height:20px;color:var(--dsw-alias-label-tertiary);max-width:520px;}",
+    ".mpm-skels{display:flex;flex-direction:column;gap:10px;}",
+    ".mpm-skel{display:flex;flex-direction:column;gap:6px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:16px;padding:14px;}",
+    ".mpm-skel-bar{height:16px;width:42%;border-radius:4px;background:var(--dsw-alias-bg-skeleton);animation:mpm-skel-pulse 2s cubic-bezier(.36,0,.64,1) infinite;}",
+    ".mpm-skel-bar.short{width:22%;}",
+    "@keyframes mpm-skel-pulse{0%{opacity:1}40%{opacity:.6}80%,100%{opacity:1}}",
+    ".mpm-foot{margin:0;padding:0 2px;font-size:11px;line-height:16px;color:var(--dsw-alias-label-tertiary);overflow-wrap:anywhere;}",
+    ".mpm-foot code{font-family:var(--ds-font-family-code);}",
+    // 行内提示（错误/警告）
+    ".mpm-alert{display:flex;align-items:flex-start;gap:10px;border-radius:10px;padding:10px 12px;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 8%,transparent);color:var(--dsw-alias-state-error-primary);}",
+    ".mpm-alert-ic{flex:none;margin-top:2px;}",
+    ".mpm-alert-body{flex:1 1 auto;min-width:0;}",
+    ".mpm-alert-text{margin:0;font-size:12.5px;line-height:18px;overflow-wrap:anywhere;}",
+    ".mpm-alert-list{margin:4px 0 0;padding-left:16px;font-size:12px;line-height:18px;overflow-wrap:anywhere;}",
+    // 弹层内容（导入 / 确认）
+    ".mpm-dialog.mpm-dialog{width:min(440px,100%);}",
+    ".mpm-dialog.mpm-dialog-wide{width:min(560px,100%);}",
+    ".mpm-dialog-content{max-height:min(60vh,520px);overflow-y:auto;}",
+    ".mpm-field{display:flex;flex-direction:column;gap:6px;}",
+    ".mpm-field-label{font-size:13px;line-height:20px;font-weight:500;}",
+    ".mpm-textarea{width:100%;box-sizing:border-box;min-height:170px;padding:10px 12px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:10px;background:var(--dsw-alias-bg-layer-3);color:var(--dsw-alias-label-primary);font-family:var(--ds-font-family-code);font-size:12px;line-height:18px;resize:vertical;}",
+    ".mpm-textarea:focus-visible{outline:none;border-color:var(--dsw-alias-state-business-primary);}",
+    ".mpm-dialog-tools{display:flex;flex-wrap:wrap;align-items:center;gap:6px;margin-top:2px;}",
+    ".mpm-sample{margin:2px 0 0;border:0.5px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px 12px;background:var(--dsw-alias-bg-module-platform);color:var(--dsw-alias-label-secondary);font-family:var(--ds-font-family-code);font-size:11px;line-height:17px;white-space:pre-wrap;max-height:200px;overflow:auto;}",
+    ".mpm-result{margin-top:2px;border:0.5px solid var(--dsw-alias-border-l2);border-radius:10px;padding:10px 12px;}",
+    ".mpm-result-title{margin:0;font-size:12.5px;line-height:18px;font-weight:500;}",
+    ".mpm-result-list{list-style:none;margin:6px 0 0;padding:0;display:flex;flex-direction:column;gap:4px;max-height:200px;overflow:auto;}",
+    ".mpm-result-row{display:flex;align-items:center;gap:8px;font-size:12px;line-height:18px;}",
+    ".mpm-result-row code{font-family:var(--ds-font-family-code);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
+    ".mpm-result-row[data-status=\"error\"]{color:var(--dsw-alias-state-error-primary);}",
+    ".mpm-result-row[data-status=\"added\"],.mpm-result-row[data-status=\"updated\"]{color:var(--dsw-alias-state-success-primary);}",
+    ".mpm-danger:not(:disabled){border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary);}",
+    ".mpm-danger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger);}",
+    ".mpm-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;}",
+    // 原子件缺失时的退化样式（真机走 ui-primitives，不经过这里）
+    ".mpm-fb-btn{display:inline-flex;align-items:center;gap:4px;border:0;border-radius:14px;padding:0 10px;height:28px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:12px;line-height:18px;cursor:pointer;}",
+    ".mpm-fb-btn:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}",
+    ".mpm-fb-btn:disabled{opacity:.4;cursor:not-allowed;}",
+    ".mpm-fb-md{height:36px;border-radius:18px;padding:0 14px;font-size:14px;line-height:22px;}",
+    ".mpm-fb-primary{background:var(--dsw-alias-button-primary-fill);color:var(--dsw-alias-label-primary-foreground);}",
+    ".mpm-fb-outline{border:0.5px solid var(--dsw-alias-border-l3);}",
+    ".mpm-fb-icon{display:inline-flex;align-items:center;}",
+    ".mpm-fb-pill{display:inline-flex;align-items:center;gap:4px;height:24px;padding:0 8px;border:0;border-radius:12px;corner-shape:round;background:var(--dsw-alias-bg-layer-2);color:var(--dsw-alias-label-secondary);font:inherit;font-size:12px;line-height:18px;cursor:pointer;}",
+    ".mpm-fb-pill.on{color:var(--dsw-alias-label-primary);background:var(--dsw-alias-button-ghost-active-fill);box-shadow:inset 0 0 0 1px var(--dsw-alias-button-ghost-active-border);}",
+    ".mpm-fb-tag{display:inline-flex;align-items:center;border-radius:999px;corner-shape:round;padding:1px 8px;font-size:11px;line-height:17px;font-weight:500;color:var(--dsw-alias-label-tertiary);border:0.5px solid var(--dsw-alias-border-l4);}",
+    ".mpm-fb-tag[data-tone=\"success\"]{border:0;background:color-mix(in srgb,var(--dsw-alias-state-success-primary) 10%,transparent);color:var(--dsw-alias-state-success-primary);}",
+    ".mpm-fb-tag[data-tone=\"warning\"]{border:0;background:color-mix(in srgb,var(--dsw-alias-state-warn-primary) 12%,transparent);color:var(--dsw-alias-state-warn-primary);}",
+    ".mpm-fb-tag[data-tone=\"danger\"]{border:0;background:color-mix(in srgb,var(--dsw-alias-state-error-primary) 10%,transparent);color:var(--dsw-alias-state-error-primary);}",
+    ".mpm-fb-dot{position:relative;display:inline-block;flex:none;border-radius:50%;corner-shape:round;background:currentColor;}",
+    ".mpm-fb-dot[data-state=\"done\"]{color:var(--dsw-alias-state-success-primary);}",
+    ".mpm-fb-dot[data-state=\"ongoing\"]{color:var(--dsw-static-deepseek-450);}",
+    ".mpm-fb-dot[data-state=\"error\"]{color:var(--dsw-alias-state-error-primary);}",
+    ".mpm-fb-dot[data-state=\"idle\"]{color:var(--dsw-alias-label-tertiary);}",
+    ".mpm-fb-input{display:inline-flex;align-items:center;gap:6px;height:32px;padding:0 8px;border:0.5px solid var(--dsw-alias-border-l4);border-radius:8px;background:var(--dsw-alias-bg-layer-1);}",
+    ".mpm-fb-input input{flex:1;min-width:0;border:0;outline:none;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:14px;}",
+    ".mpm-fb-menu{position:relative;display:inline-flex;}",
+    ".mpm-fb-menu-list{position:absolute;right:0;top:calc(100% + 4px);z-index:2;min-width:160px;border-radius:12px;padding:4px;background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-panel);}",
+    ".mpm-fb-menu-item{display:flex;align-items:center;gap:8px;width:100%;border:0;border-radius:8px;padding:6px 8px;background:transparent;color:var(--dsw-alias-label-primary);font:inherit;font-size:13px;text-align:left;cursor:pointer;}",
+    ".mpm-fb-menu-item:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover);}",
+    ".mpm-fb-menu-item[data-danger=\"true\"]{color:var(--dsw-alias-state-error-primary);}",
+    ".mpm-fb-menu-sep{height:1px;margin:4px 6px;background:var(--dsw-alias-border-l2);}",
+    ".mpm-fb-mask{position:fixed;inset:0;z-index:1000;display:flex;align-items:center;justify-content:center;padding:24px;}",
+    ".mpm-fb-masklayer{position:absolute;inset:0;background:var(--dsw-alias-bg-mask-1);}",
+    ".mpm-fb-dialog{position:relative;z-index:1;display:flex;flex-direction:column;gap:12px;max-height:calc(100vh - 48px);border-radius:24px;padding:20px 24px;background:var(--dsw-alias-bg-layer-2);box-shadow:var(--dsw-elevation-prominent);overflow:auto;}",
+    ".mpm-fb-dialog-head{display:flex;align-items:center;justify-content:space-between;gap:8px;}",
+    ".mpm-fb-dialog-head h2{margin:0;font-size:16px;line-height:24px;font-weight:500;}",
+    ".mpm-fb-dialog-head button{border:0;border-radius:8px;padding:4px 8px;background:transparent;color:var(--dsw-alias-label-secondary);cursor:pointer;}",
+    ".mpm-fb-dialog-desc{margin:0;font-size:14px;line-height:22px;}",
+    ".mpm-fb-dialog-foot{display:flex;justify-content:flex-end;gap:8px;}",
+    ".mpm-fb-toast{position:fixed;top:40px;left:50%;transform:translateX(-50%);z-index:1100;pointer-events:none;display:flex;align-items:center;gap:10px;max-width:min(640px,calc(100vw - 48px));border-radius:14px;padding:12px 16px;background:var(--dsw-alias-button-contrast-fill);color:var(--dsw-alias-label-primary-inverted);font-size:14px;line-height:22px;box-shadow:var(--dsw-shadow-lv3);}",
+    // 动效尊重系统偏好
+    "@media (prefers-reduced-motion:reduce){.mpm-chev{transition:none;}.mpm-skel-bar{animation:none;}}",
+    "@media (prefers-reduced-motion:no-preference){.mpm-chev{transition:transform 140ms var(--ds-ease-in-out);}}",
   ].join("");
 
   // ── CSS 注入（幂等；带版本号便于热更新时覆盖旧样式）────────────────────
-  const CSS_TAG = "dsh-mcp-manager-panel-v5";
+  const CSS_TAG = "dsh-mcp-manager-panel-v6";
   function injectCss() {
     if (typeof document === "undefined") return;
     if (document.querySelector("style[data-plugin-css=" + JSON.stringify(CSS_TAG) + "]") !== null) return;
@@ -1121,9 +1427,16 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     name,
     inject,
     apply,
+    // 开发用：可被 client/render-smoke.mjs 直接驱动。
+    atoms: Object.keys(atoms),
     __test: {
-      hueFor, vendorLabel, endpointText, groupEntries, exportPayload,
-      components: { ManagerView, ManagerSection, ImportCard, TierSeg, StatusBadge, MessageBanner, toolStrip, serviceRow, groupCard },
+      vendorLabel, endpointText, groupEntries, groupStats, groupSummary, exportPayload,
+      statusText, statusDot, statusTone, importSummary,
+      components: {
+        ManagerView, ManagerSection, ImportDialog, ConfirmDialog, NoticeAlert, ToolPanel,
+        TierPicker, StatusTag, SearchField, StatsLine, EmptyState, SkeletonList,
+        MemberItem, GroupCard, SingleCard,
+      },
     },
   };
 }});
