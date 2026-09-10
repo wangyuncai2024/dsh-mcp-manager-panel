@@ -134,6 +134,18 @@ assert(T.groupEntries([{ name: "simplename" }])[0].kind === "group", "无连字�
 const gOther = T.groupEntries([{ name: "" }]);
 assert(gOther.length === 1 && gOther[0].kind === "single" && gOther[0].prefix === "other", "空名称归入 other 单条");
 
+assert(T.groupIsOpen("local", null, {}) === false && T.groupIsOpen("local", null, { local: true }) === true,
+  "组展开：默认全部收起，只有显式展开过才打开");
+assert(T.groupIsOpen("local", true, {}) === true && T.groupIsOpen("local", false, { local: true }) === false,
+  "组展开：顶栏批量态优先于逐组状态");
+const togOne = T.toggleGroupOpen({ expandAll: null, openGroups: {} }, "local", ["local"]);
+assert(togOne.expandAll === null && togOne.openGroups.local === true, "默认收起时点组头 → 只展开该组");
+const togFromAll = T.toggleGroupOpen({ expandAll: true, openGroups: {} }, "pkulaw", ["pkulaw", "local"]);
+assert(togFromAll.expandAll === null && togFromAll.openGroups.pkulaw === false && togFromAll.openGroups.local === true,
+  "全部展开后收起一组：其余组保持展开（批量态固化成逐组状态）");
+const togFromNone = T.toggleGroupOpen({ expandAll: false, openGroups: {} }, "local", ["local"]);
+assert(togFromNone.openGroups.local === true, "全部收起后点组头 → 展开该组");
+
 const exp = T.exportPayload([
   { name: "a-b", transport: "streamable-http", url: "https://a", headers: { Authorization: "x" }, tier: "eager", notes: "" },
   { name: "c-d", transport: "stdio", command: "npx", args: ["-y", "p"], cwd: "/tmp", env: { A: "1" } },
@@ -186,7 +198,9 @@ for (const probe of [
   assert(mainHtml.includes(probe), "主视图包含: " + probe);
 }
 assert(!mainHtml.includes("mpm-textarea"), "导入弹层默认关闭（页面不再常驻粘贴框）");
-assert(mainHtml.includes(">tools<") && mainHtml.includes('title="local-tools"'), "单成员组默认展开且完整名在悬停提示里");
+assert(!mainHtml.includes('class="mpm-row"') && !mainHtml.includes('data-open="true"'),
+  "打开面板时所有分组（含单成员组）一致默认收起：不渲染成员行");
+assert(mainHtml.includes('aria-expanded="false"'), "默认收起：组头折叠钮 aria-expanded=false");
 assert(!mainHtml.includes("mpm-skel"), "非加载态无骨架屏");
 
 const loadingHtml = render(h(C.ManagerView, { ...viewProps, loading: true, entries: [] }));

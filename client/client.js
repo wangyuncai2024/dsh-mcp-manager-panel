@@ -282,6 +282,23 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     return parts.join(" · ");
   }
 
+  // 组展开状态：**默认全部收起**（单成员组同样收起，只有显式展开过才渲染成员行）。
+  // state.expandAll 非空 = 顶栏"全部展开/收起"批量态，优先于逐组显式状态。
+  function groupIsOpen(prefix, expandAll, openGroups) {
+    if (expandAll !== null) return expandAll === true;
+    return openGroups[prefix] === true;
+  }
+
+  // 点组头：只翻转被点的那一组。若当前处于批量态，先把批量结果固化成逐组显式状态，
+  // 否则退出批量态后其余组会一起回落到"默认收起"（看起来像误折叠）。
+  function toggleGroupOpen(state, prefix, prefixes) {
+    const open = !groupIsOpen(prefix, state.expandAll, state.openGroups);
+    const base = state.expandAll === null
+      ? state.openGroups
+      : prefixes.reduce((acc, item) => { acc[item] = state.expandAll === true; return acc; }, {});
+    return { expandAll: null, openGroups: { ...base, [prefix]: open } };
+  }
+
   // 反向导出：注册表条目 → Claude/Cursor 风格 mcpServers JSON。
   function exportPayload(entries) {
     const servers = {};
@@ -762,8 +779,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     } = props;
 
     const [query, setQuery] = useState("");
-    const [expandAll, setExpandAll] = useState(null);
-    const [openGroups, setOpenGroups] = useState({});
+    const [groupState, setGroupState] = useState({ expandAll: null, openGroups: {} });
     const [toolPop, setToolPop] = useState("");
     const [errorOpen, setErrorOpen] = useState("");
     const [copied, setCopied] = useState("");
@@ -804,25 +820,18 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       return { total: entries.length, connected, tools: onlineTools, eager, disabled };
     }, [entries]);
 
-    // 单成员组默认展开：未显式折叠前视为打开（多成员组默认折叠）。
-    const singlePrefixes = useMemo(() => {
-      const set = new Set();
-      for (const item of visible) {
-        if (item.kind === "group" && item.members.length === 1) set.add(item.prefix);
-      }
-      return set;
-    }, [visible]);
+    // 组默认全部收起（含单成员组）：见 groupIsOpen / toggleGroupOpen 纯函数。
+    const groupPrefixes = useMemo(
+      () => visible.filter((item) => item.kind === "group").map((item) => item.prefix),
+      [visible],
+    );
 
-    const isOpen = (prefix) => {
-      if (expandAll !== null) return expandAll;
-      if (openGroups[prefix] !== undefined) return openGroups[prefix] === true;
-      return singlePrefixes.has(prefix);
-    };
-    const onToggleGroup = (prefix) => {
-      setExpandAll(null);
-      setOpenGroups((prev) => ({ ...prev, [prefix]: !(prev[prefix] === true) }));
-    };
-    const onToggleAll = () => setExpandAll(expandAll === true ? false : true);
+    const isOpen = (prefix) => groupIsOpen(prefix, groupState.expandAll, groupState.openGroups);
+    const onToggleGroup = (prefix) => setGroupState((prev) => toggleGroupOpen(prev, prefix, groupPrefixes));
+    const onToggleAll = () => setGroupState((prev) => ({
+      expandAll: prev.expandAll === true ? false : true,
+      openGroups: prev.openGroups,
+    }));
 
     const onCopy = async (label, text) => {
       const ok = await writeClipboard(text);
@@ -954,7 +963,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     ]));
 
     parts.push(h(StatsLine, {
-      key: "st", stats, expandAll, disabled: entries.length === 0 || loading, onToggleAll,
+      key: "st", stats, expandAll: groupState.expandAll, disabled: entries.length === 0 || loading, onToggleAll,
     }));
 
     if (notice && notice.kind === "ok") {
@@ -1431,7 +1440,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     atoms: Object.keys(atoms),
     __test: {
       vendorLabel, endpointText, groupEntries, groupStats, groupSummary, exportPayload,
-      statusText, statusDot, statusTone, importSummary,
+      statusText, statusDot, statusTone, importSummary, groupIsOpen, toggleGroupOpen,
       components: {
         ManagerView, ManagerSection, ImportDialog, ConfirmDialog, NoticeAlert, ToolPanel,
         TierPicker, StatusTag, SearchField, StatsLine, EmptyState, SkeletonList,
