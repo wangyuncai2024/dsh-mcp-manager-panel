@@ -29,7 +29,11 @@ DSH 宿主级打包插件的 **MCP 服务管理面板 + MCP 运行时一体**：
   （部分服务器要求）。SSE/JSON 均由 SDK 处理，不要再实现手写 curl 解析。
 - **webServer 是惰性服务**：必须 `ctx.inject(["webServer"], (hostCtx) => …)` 后再注册路由。
 - **webServer.register 同 (kind, path) 重复会抛错**：每条路由用独立 path；方法不匹配回 405；
-  POST 必须校验 `sameOrigin(request)`。
+  POST 必须校验 `sameOrigin(request)`。判定语义（勿收紧回"缺 Origin 即 403"，否则桌面壳 / 反代
+  访问的设置页会把所有写操作打成 `403 untrusted origin`）：Host 归一化（小写 + 去 `:80`）后，
+  Origin 缺失/`null`/空串 → 仅当 Host 是回环（`127.0.0.1` / `::1` / `localhost`，注意 `[::1]:port`
+  必须按括号取主机名）才放行；Origin 存在则必须与 Host 同源，非法 Origin 一律拒绝。
+  回归测试：`node client/origin-guard-smoke.mjs`（从 lib/index.js 抽取真实函数跑 19 个用例）。
 - **不要从浏览器直接读注册表**：一律走 `/mcp-panel/*` 同源路由。
 - **读写即时进行**（每次 handler 读文件 → 改 → 原子写）：避免维护进程内缓存与多会话不一致；
   写前 `mkdir(dirname, {recursive:true})`。
@@ -77,6 +81,10 @@ node <本包路径>/client/render-smoke.mjs
 测试会跑两条路径：① `client/primitives-stub.mjs` 替身（模拟平台 seed 的 ui-primitives），
 ② 不提供原子件（走内置退化实现）；并交叉校验客户端读到的每个原子名都由 `ui-primitives` 真实导出
 （环境变量 `DSH_CHECKOUT` 指定检出路径，默认 `/home/wangyuncai/deepseek-harness`，找不到则跳过）。
+
+宿主同源守卫回归测试（无 React 依赖，直接跑）：`node client/origin-guard-smoke.mjs`——从 lib/index.js
+抽取 `normalizeHost` / `hostNameOf` / `isLoopbackHost` / `sameOrigin` 真实实现，覆盖 19 个请求头形状
+（同源放行、跨站拒绝、无 Origin 回环放行、外网 Host 拒绝、IPv6 括号等）。
 
 本地安装到 profile 测试（file: 依赖要 remove+add 才刷新）：
 

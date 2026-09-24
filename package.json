@@ -1,7 +1,7 @@
 {
   "name": "dsh-mcp-manager-panel",
-  "version": "0.4.1",
-  "description": "DSH MCP 服务管理面板（自足版）：设置页粘贴 mcpServers JSON 一键导入，厂商分组卡片视图，组级/单条档位管理，并自带 MCP 连接/工具注册/调用（stdio + streamable-http），无需能力库插件。v0.4.0：客户端 UI 对齐 DSH 设置面板——复用平台 ui-primitives 原子件（Button/Pill/Tag/StateDot/Menu/Modal/Toast/图标），版式与颜色走 --dsw-alias-* 与设置页排版约定；导入改弹层、删除改确认弹层、成功提示走 Toast、组动作收进 ⋯ 菜单。v0.4.1：组展开默认值统一为全部收起（单成员组不再默认展开）。",
+  "version": "0.4.2",
+  "description": "DSH MCP 服务管理面板（自足版）：设置页粘贴 mcpServers JSON 一键导入，厂商分组卡片视图，组级/单条档位管理，并自带 MCP 连接/工具注册/调用（stdio + streamable-http），无需能力库插件。v0.4.0：客户端 UI 对齐 DSH 设置面板——复用平台 ui-primitives 原子件（Button/Pill/Tag/StateDot/Menu/Modal/Toast/图标），版式与颜色走 --dsw-alias-* 与设置页排版约定；导入改弹层、删除改确认弹层、成功提示走 Toast、组动作收进 ⋯ 菜单。v0.4.1：组展开默认值统一为全部收起（单成员组不再默认展开）。v0.4.2：修复同源守卫误判——Origin 缺失/为空时（桌面壳、反代、curl 等非浏览器请求）不再一律 403 untrusted origin，回环 Host 放行；Host 归一化（小写 + 去 :80），跨站与非法 Origin 仍拒绝。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {
