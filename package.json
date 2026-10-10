@@ -1,7 +1,7 @@
 {
   "name": "dsh-mcp-manager-panel",
-  "version": "0.5.0",
-  "description": "DSH MCP 服务管理面板（自足版）：设置页粘贴 mcpServers JSON 一键导入，厂商分组卡片视图，组级/单条档位管理，并自带 MCP 连接/工具注册/调用（stdio + streamable-http），无需能力库插件。v0.4.0：客户端 UI 对齐 DSH 设置面板——复用平台 ui-primitives 原子件（Button/Pill/Tag/StateDot/Menu/Modal/Toast/图标），版式与颜色走 --dsw-alias-* 与设置页排版约定；导入改弹层、删除改确认弹层、成功提示走 Toast、组动作收进 ⋯ 菜单。v0.4.1：组展开默认值统一为全部收起（单成员组不再默认展开）。v0.4.2：修复同源守卫误判——Origin 缺失/为空时（桌面壳、反代、curl 等非浏览器请求）不再一律 403 untrusted origin，回环 Host 放行；Host 归一化（小写 + 去 :80），跨站与非法 Origin 仍拒绝。v0.4.3：导入按端点签名去重——http 比 url+headers、stdio 比 command+args+cwd+env（键小写），同端点换名字再导入判为 duplicate 并跳过，不再把同一服务连两遍、工具成对出现。v0.5.0：分组键从名字前缀改为端点主机（streamable-http 取 url 主机、stdio 退回名字前缀），同一网关下的服务不管叫什么名字都在同一张卡；组名解析改走 groupTitle（自定义名 → 厂商中文名 → 主机名，兼容旧的前缀键组名）。",
+  "version": "0.5.1",
+  "description": "DSH MCP 服务管理面板（自足版）：设置页粘贴 mcpServers JSON 一键导入，厂商分组卡片视图，组级/单条档位管理，并自带 MCP 连接/工具注册/调用（stdio + streamable-http），无需能力库插件。v0.4.0：客户端 UI 对齐 DSH 设置面板——复用平台 ui-primitives 原子件（Button/Pill/Tag/StateDot/Menu/Modal/Toast/图标），版式与颜色走 --dsw-alias-* 与设置页排版约定；导入改弹层、删除改确认弹层、成功提示走 Toast、组动作收进 ⋯ 菜单。v0.4.1：组展开默认值统一为全部收起（单成员组不再默认展开）。v0.4.2：修复同源守卫误判——Origin 缺失/为空时（桌面壳、反代、curl 等非浏览器请求）不再一律 403 untrusted origin，回环 Host 放行；Host 归一化（小写 + 去 :80），跨站与非法 Origin 仍拒绝。v0.4.3：导入按端点签名去重——http 比 url+headers、stdio 比 command+args+cwd+env（键小写），同端点换名字再导入判为 duplicate 并跳过，不再把同一服务连两遍、工具成对出现。v0.5.0：分组键从名字前缀改为端点主机（streamable-http 取 url 主机、stdio 退回名字前缀），同一网关下的服务不管叫什么名字都在同一张卡；组名解析改走 groupTitle（自定义名 → 厂商中文名 → 主机名，兼容旧的前缀键组名）。v0.5.1：修复组名变成网址——groupTitle 认不出厂商时不再直显端点主机，改走 hostShortName 生成可读短名（mcp.tavily.com → Tavily 系列）；并补图标两代命名兼容（Icon*Outline16/14 → 当前壳的 Icon*OutlineRegular），此前图标静默消失、按钮只剩文字。",
   "type": "module",
   "main": "lib/index.js",
   "exports": {

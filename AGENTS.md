@@ -2,7 +2,7 @@
 
 给接手继续开发的 AI / 开发者。改代码前先读本文件 + README.md。
 
-## 是什么（v0.5.0 自足版 · UI 对齐 DSH 设置面板）
+## 是什么（v0.5.1 自足版 · UI 对齐 DSH 设置面板）
 
 DSH 宿主级打包插件的 **MCP 服务管理面板 + MCP 运行时一体**：
 - **Host**：`lib/index.js`（ESM）。读写权威注册表 `<dataDir>/registry.json`，用
@@ -29,14 +29,29 @@ DSH 宿主级打包插件的 **MCP 服务管理面板 + MCP 运行时一体**：
 - **分组键 = 端点主机（v0.5.0，勿退回纯名字前缀）**：`groupKeyOf()`——`streamable-http` 取 url 主机
   （`hostOfUrl`：小写、去端口与用户信息、IPv6 保留括号），没有可用 url 的（stdio）才退回名字前缀
   （第一个 `-` 之前），空名落 `other`（唯一平铺成单条的路径）。组显示名 `groupTitle()`：自定义组名 >
-  厂商中文名（`VENDOR_HOST_HINT` 主机片段 → `VENDOR_LABEL`；也可由组内成员的名字前缀命中）>
-  主机名直显 / `<前缀> 系列`。`groups.json` 的键 v0.5.0 起是主机，但**旧的按名字前缀存的键仍会回退查询**
-  （本机 `yuandian` → 华宇元典法律连接器）。宿主 `setGroupTitle` 校验组键用 `GROUP_RE`（允许 `.` `:`），
-  条目名仍用严格的 `NAME_RE`。成员行显示名走 `shortNameOf(name)`，**不要**再用
-  `entry.name.slice(prefix.length + 1)`（组键是主机时会切出乱码）。
+  厂商名（`VENDOR_HOST_HINT` 主机片段 → `VENDOR_LABEL`；也可由组内成员的名字前缀命中）>
+  主机短名 + `" 系列"` / 非主机组键的 `<前缀> 系列`。`groups.json` 的键 v0.5.0 起是主机，但
+  **旧的按名字前缀存的键仍会回退查询**（本机 `yuandian` → 华宇元典法律连接器）。宿主 `setGroupTitle`
+  校验组键用 `GROUP_RE`（允许 `.` `:`），条目名仍用严格的 `NAME_RE`。成员行显示名走 `shortNameOf(name)`，
+  **不要**再用 `entry.name.slice(prefix.length + 1)`（组键是主机时会切出乱码）。
   背景：纯名字前缀分组会把同一厂商拆成多张卡——`mcp-law-agg` 落进「mcp 系列」，`law_recognition`
   这类无连字符的名字各自成组，15 个北大服务被拆成 5~6 张卡；改按端点主机后同网关服务天然同组。
   另注：主机组没有"组前缀"可复制，`⋯ → 复制调用前缀` 改为逐条列出成员的工具前缀（每行一个）。
+- **组名绝不能是网址（v0.5.1 回归修复，勿退回 `String(key)`）**：v0.5.0 的 `groupTitle` 兜底是
+  `isHostKey(key) ? String(key) : vendorLabel(key)`，于是**认不出厂商的组直接把端点主机当卡片标题**——
+  `api.githubcopilot.com`、`mcp.tavily.com`、`mcp.context7.com` 就这么出现在组头。现在兜底走
+  `hostShortName(key)`：先摘公共后缀（`HOST_SUFFIX_LABEL`，近似 PSL，`co.uk` 这类二层后缀也摘），
+  再跳过接入方式子域（`HOST_NOISE_LABEL`：mcp/api/www/open/gateway/apim…），取剩下最靠左一段，
+  输出 `"<短名> 系列"`。没有可读主体的（单标签主机、IPv6 字面量）才原样显示。
+  **改 groupTitle 时保持"不出现 `:` `/`"**——冒烟测试有 `!/[:/]/.test(title)` 与一整套主机→组名断言
+  （`mcp.tavily.com → Tavily 系列`、`api.githubcopilot.com → GitHub MCP` 等）。
+- **图标名两代兼容（v0.5.1）**：DSH `4937343a5e`（2026-09-17，"unify the client visual language"）
+  把 `Icon*Outline16/14` 改名为 `Icon*OutlineRegular/Medium`（字号改走 `size` prop）。客户端 `glyph()`
+  **先试当前代名、再回退旧代名**（顺序不可反），两代都缺才退化成无图标。
+  背景：v0.5.0 只按旧名 `require`，在当前壳里 14 个图标全部静默变空——按钮只剩文字，UI 看着"变了"却
+  不报错（`glyph` 的 `NullIcon` 兜底吃掉了问题）。替身 `primitives-stub.mjs` 的 Proxy
+  **对未注册键返回 `undefined`**（不再伪造一个能渲染的函数），否则回退链永远命中第一个、测不出真实行为；
+  `createPrimitives(React, { legacyIcons: true })` 模拟改名前的壳，冒烟测试两条路径都断言"图标真的渲染"。
 - **档位语义（写盘即热生效）**：`eager` = 插件启动自动连接 / 运行时改 eager 立即后台连接；
   `on-demand` = 仅写盘，点连接（UI 或等待重启）再连；`disabled` = 立即断开该服务。
 - **工具定义对象**（裸对象，勿用动态 harness.defineTool）：`{ name, description, parameters: JSON Schema,
@@ -132,8 +147,9 @@ UI 验证点（v0.4.0 起）：顶栏三个按钮与搜索框在同一行且不�
 组展开（v0.4.1 起）：**打开面板时所有组一律默认收起**（单成员组同样收起；改 `groupIsOpen` 的默认分支即可），
 点组头只翻转该组，"全部展开"后收起单组不会连带收起其余组——纯函数 `groupIsOpen` / `toggleGroupOpen` 有冒烟覆盖。
 分组（v0.5.0 起）：**同一个 url 主机的服务必须出现在同一张卡里**，与名字无关（改分组规则只动
-`groupKeyOf` / `groupTitle` / `shortNameOf` 这三个纯函数，冒烟测试里有对应断言）；组摘要行首位显示的是
-**组键**（主机名），据此可一眼看出为什么这几条被归在一起；`⋯ → 复制调用前缀` 在主机组下逐行给出成员前缀。
+`groupKeyOf` / `groupTitle` / `hostShortName` / `shortNameOf` 这几个纯函数，冒烟测试里有对应断言）；
+组摘要行首位显示的是**组键**（主机名），据此可一眼看出为什么这几条被归在一起——注意摘要行显示主机
+是**有意为之**（诊断线索），但**卡片标题（组名）绝不能是网址**；`⋯ → 复制调用前缀` 在主机组下逐行给出成员前缀。
 客户端是普通 fetch bundle，改完 `client/client.js` 后**刷新页面**即可生效（client-plugin 热更新仅在
 `pnpm run dev:web` 同时运行时免刷新）。
 

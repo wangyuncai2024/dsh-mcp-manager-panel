@@ -111,6 +111,34 @@ if (existsSync(primIndex) && existsSync(iconIndex)) {
   console.log("  skip - 未找到 DSH 检出，跳过 ui-primitives 导出交叉校验");
 }
 
+// 图标两代命名都要能接（回归：DSH 4937343a5e 把 ...16/14 改名为 ...Regular 后，
+// 客户端只按旧名 require，图标静默退化成"没有图标"，按钮只剩文字）。
+{
+  const stubNew = createPrimitives(React);
+  const stubOld = createPrimitives(React, { legacyIcons: true });
+  const modOf = (stubImpl) => loadClient((id) => {
+    if (id === "react") return React;
+    if (id === "@deepseek-ai/dsh-client-ui-primitives") return stubImpl.primitives;
+    throw new Error("unexpected require: " + id);
+  });
+  const modNew = modOf(stubNew);
+  const modOld = modOf(stubOld);
+  const emptyView = (mod2) => render(h("div", null, h(mod2.__test.components.ManagerView, {
+    entries: [], path: "/r.json", loading: false, error: "", importing: false, refreshing: false,
+    busyNames: {}, applyingGroup: "", notice: null, groupMeta: {},
+    onRefresh: noop, onImport: noop, onToast: noop, onAlert: noop, onTier: noop, onDelete: noop,
+    onLoad: noop, onUnload: noop, onGroupTier: noop, onGroupLoad: noop, onGroupUnload: noop,
+    onAskGroupDelete: noop, onSetGroupTitle: noop, onDismissNotice: noop,
+  })));
+  // 新壳：客户端读到的每个名字都真实存在（没有白读的键）。
+  assert([...new Set(stubNew.reads)].length > 0 && stubNew.misses.length === 0,
+    "新壳（...Regular）：无未实现读取（未命中：" + stubNew.misses.join(",") + "）");
+  assert(emptyView(modNew).includes('data-icon="IconPlusOutlineRegular"'), "新壳下图标真的渲染出来（不再是空图标）");
+  // 旧壳：新名字 miss 是预期的（回退链的第一步），关键是**图标照样渲染**，走旧代名字。
+  assert(stubOld.reads.includes("IconPlusOutline16"), "旧壳（...16/14）：回退到旧代名");
+  assert(emptyView(modOld).includes('data-icon="IconPlusOutline16"'), "旧壳下图标同样渲染出来（兼容不破）");
+}
+
 // ── 纯函数 ────────────────────────────────────────────────────────────────
 assert(T.vendorLabel("pkulaw") === "北大法宝 MCP", "vendorLabel 厂商中文名");
 assert(T.vendorLabel("random") === "random 系列", "vendorLabel 默认样式");
@@ -153,14 +181,32 @@ assert(T.hostOfUrl("https://User:pw@Example.COM:8443/path") === "example.com" &&
   "hostOfUrl：去用户信息与端口、小写、非法输入返回空");
 assert(T.hostOfUrl("http://[::1]:8080/mcp") === "[::1]", "hostOfUrl：IPv6 保留括号");
 
-// 组显示名：主机键 → 厂商中文名；认不出厂商就显示主机；旧的前缀键自定义名继续生效。
+// 组显示名：主机键 → 厂商中文名；认不出厂商也要给"短名 系列"，**绝不能把整串网址当组名**。
 assert(T.groupTitle("apim-gateway.pkulaw.com", pkHostGroup.members, {}) === "北大法宝 MCP", "主机组 → 厂商中文名");
 assert(T.groupTitle("apim-gateway.pkulaw.com", pkHostGroup.members, { "apim-gateway.pkulaw.com": { title: "北大法宝" } }) === "北大法宝",
   "自定义组名优先于厂商自动名");
 assert(T.groupTitle("open.chineselaw.com", [{ name: "yuandian-open-platform" }], { yuandian: { title: "华宇元典法律连接器" } }) === "华宇元典法律连接器",
   "组名兼容：v0.4.x 按名字前缀存的旧组名仍然生效");
-assert(T.groupTitle("mcp.internal", [{ name: "foo-bar" }], {}) === "mcp.internal", "认不出厂商的主机组直接显示主机名");
 assert(T.groupTitle("local", [{ name: "local-tools" }], {}) === "local 系列", "非主机组键仍走 <前缀> 系列");
+
+// v0.5.1：认不出厂商的主机组给可读短名（回归：曾把 api.githubcopilot.com 整串当组名显示）。
+assert(T.groupTitle("api.githubcopilot.com", [{ name: "github" }], {}) === "GitHub MCP",
+  "api.githubcopilot.com → 厂商名 GitHub");
+assert(T.groupTitle("mcp.tavily.com", [{ name: "tavily-remote-mcp" }], {}) === "Tavily MCP", "mcp.tavily.com → Tavily");
+assert(T.groupTitle("mcp.context7.com", [{ name: "context7" }], {}) === "Context7 MCP", "mcp.context7.com → Context7");
+// 未登记的厂商：去掉接入子域与公共后缀，给 "<主体> 系列"，而不是域名。
+assert(T.groupTitle("mcp.internal", [{ name: "foo-bar" }], {}) === "internal 系列", "未登记主机：mcp.internal → internal 系列");
+assert(T.groupTitle("mcp.some-vendor.example.com", [{ name: "x-y" }], {}) === "some-vendor 系列",
+  "未登记主机：去掉 mcp 子域与 .example.com 后缀");
+assert(T.groupTitle("api.acme.co.uk", [{ name: "a-b" }], {}) === "acme 系列", "二层公共后缀（co.uk）也要摘掉");
+assert(T.groupTitle("mcp.vendor.cn", [{ name: "a-b" }], {}) === "vendor 系列", "国家后缀（.cn）也要摘掉");
+// 单标签主机 / IPv6 字面量没有可读主体：原样显示，但不得拼出"无意义短名"。
+assert(T.groupTitle("vendor.com", [{ name: "a-b" }], {}) === "vendor 系列", "单标签主体（vendor.com）→ vendor 系列");
+assert(T.groupTitle("localhost", [{ name: "a-b" }], {}) === "localhost 系列", "非主机组键不受影响");
+assert(T.groupTitle("[::1]", [{ name: "a-b" }], {}) === "[::1]", "IPv6 字面量原样显示（没有可读主体）");
+assert(T.hostShortName("mcp.tavily.com") === "tavily" && T.hostShortName("api.githubcopilot.com") === "githubcopilot",
+  "hostShortName：摘后缀 + 跳过接入子域");
+assert(!/[:/]/.test(T.groupTitle("api.githubcopilot.com", [{ name: "github" }], {})), "组名不含协议或斜杠");
 assert(T.shortNameOf("pkulaw-law-search") === "law-search" && T.shortNameOf("law_recognition") === "law_recognition",
   "成员显示名：去掉名字自己第一段（不再依赖组键，主机键也不会切出乱码）");
 

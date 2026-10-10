@@ -119,7 +119,15 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     atoms = {};
   }
   const atom = (key) => (typeof atoms[key] === "function" ? atoms[key] : FALLBACK[key]);
-  const glyph = (key) => (typeof atoms[key] === "function" ? atoms[key] : NullIcon);
+  // 图标：DSH 于 4937343a5e（2026-09-17，unify the client visual language）把 `Icon*Outline16/14`
+  // 改名为 `Icon*OutlineRegular/Medium`，把字号改成 size prop。**先试当前代名，再回退旧代名**
+  // （顺序不能反：平台模块缺键时是 undefined，而替身/Proxy 可能给出伪造值）；
+  // 两代都没有（更老的壳）才退化成无图标，绝不抛错。
+  const glyph = (current, legacy) => {
+    if (typeof atoms[current] === "function") return atoms[current];
+    if (legacy !== undefined && typeof atoms[legacy] === "function") return atoms[legacy];
+    return NullIcon;
+  };
 
   const Button = atom("Button");
   const Pill = atom("Pill");
@@ -132,20 +140,20 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
   // 剪贴板用平台的 writeClipboard（失败反馈仍由本组件给出），缺失时退回本地实现。
   const writeClipboard = typeof atoms.writeClipboard === "function" ? atoms.writeClipboard : fallbackClipboard;
 
-  const IconCheckOutline16 = glyph("IconCheckOutline16");
-  const IconChevronDownOutline14 = glyph("IconChevronDownOutline14");
-  const IconChevronUpOutline14 = glyph("IconChevronUpOutline14");
-  const IconCloseOutline16 = glyph("IconCloseOutline16");
-  const IconCopyOutline16 = glyph("IconCopyOutline16");
-  const IconDownloadOutline16 = glyph("IconDownloadOutline16");
-  const IconEditOutline16 = glyph("IconEditOutline16");
-  const IconEllipsisOutline16 = glyph("IconEllipsisOutline16");
-  const IconLinkOutline14 = glyph("IconLinkOutline14");
-  const IconPlusOutline16 = glyph("IconPlusOutline16");
-  const IconRefreshOutline16 = glyph("IconRefreshOutline16");
-  const IconSearchOutline16 = glyph("IconSearchOutline16");
-  const IconTrashOutline16 = glyph("IconTrashOutline16");
-  const IconWarningOutline16 = glyph("IconWarningOutline16");
+  const IconCheckOutline16 = glyph("IconCheckOutlineRegular", "IconCheckOutline16");
+  const IconChevronDownOutline14 = glyph("IconChevronDownOutlineRegular", "IconChevronDownOutline14");
+  const IconChevronUpOutline14 = glyph("IconChevronUpOutlineRegular", "IconChevronUpOutline14");
+  const IconCloseOutline16 = glyph("IconCloseOutlineRegular", "IconCloseOutline16");
+  const IconCopyOutline16 = glyph("IconCopyOutlineRegular", "IconCopyOutline16");
+  const IconDownloadOutline16 = glyph("IconDownloadOutlineRegular", "IconDownloadOutline16");
+  const IconEditOutline16 = glyph("IconEditOutlineRegular", "IconEditOutline16");
+  const IconEllipsisOutline16 = glyph("IconEllipsisOutlineRegular", "IconEllipsisOutline16");
+  const IconLinkOutline14 = glyph("IconLinkOutlineRegular", "IconLinkOutline14");
+  const IconPlusOutline16 = glyph("IconPlusOutlineRegular", "IconPlusOutline16");
+  const IconRefreshOutline16 = glyph("IconRefreshOutlineRegular", "IconRefreshOutline16");
+  const IconSearchOutline16 = glyph("IconSearchOutlineRegular", "IconSearchOutline16");
+  const IconTrashOutline16 = glyph("IconTrashOutlineRegular", "IconTrashOutline16");
+  const IconWarningOutline16 = glyph("IconWarningOutlineRegular", "IconWarningOutline16");
 
   const name = "dsh-mcp-manager-panel";
   const inject = ["slots"];
@@ -183,9 +191,33 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     disabled: "disabled · 停用（立即断开）",
   };
   const TIER_TITLE = "档位：eager=随启动自动连接｜on-demand=点“连接”再连｜disabled=停用";
-  const VENDOR_LABEL = { pkulaw: "北大法宝", yuandian: "原点法律数据" };
-  // 厂商识别补充线索：端点主机片段 → 厂商键。组键改成主机后，仍能给出中文厂商名。
-  const VENDOR_HOST_HINT = { pkulaw: ["pkulaw"], yuandian: ["chineselaw", "yuandian"] };
+  // 厂商名映射（可选线索，认不出就走下面的主机短名兜底）：厂商键 → 中文名，主机片段 → 厂商键。
+  const VENDOR_LABEL = {
+    pkulaw: "北大法宝",
+    yuandian: "原点法律数据",
+    tavily: "Tavily",
+    context7: "Context7",
+    github: "GitHub",
+  };
+  const VENDOR_HOST_HINT = {
+    pkulaw: ["pkulaw"],
+    yuandian: ["chineselaw", "yuandian"],
+    tavily: ["tavily"],
+    context7: ["context7"],
+    github: ["githubcopilot", "github.com"],
+  };
+  // 主机 → 短名兜底用：接入方式子域对"这是哪家"没有信息量，往上取一层。
+  const HOST_NOISE_LABEL = {
+    mcp: 1, mcps: 1, mcpapi: 1, api: 1, apis: 1, www: 1, open: 1, gateway: 1,
+    apim: 1, apimgateway: 1, server: 1, srv: 1, service: 1, services: 1, streamable: 1, mcpstreamable: 1,
+  };
+  // 已知公共后缀（近似，不引 PSL）：末尾连续命中即视为后缀，用来定位注册域那一段。
+  const HOST_SUFFIX_LABEL = {
+    com: 1, net: 1, org: 1, edu: 1, gov: 1, mil: 1, int: 1, info: 1, biz: 1, pro: 1, name: 1,
+    io: 1, ai: 1, dev: 1, app: 1, co: 1, cn: 1, uk: 1, us: 1, de: 1, jp: 1, fr: 1, ru: 1, au: 1,
+    ca: 1, ch: 1, it: 1, nl: 1, se: 1, no: 1, es: 1, br: 1, in: 1, kr: 1, tw: 1, hk: 1, sg: 1,
+    me: 1, tv: 1, cc: 1, xyz: 1, top: 1, site: 1, online: 1, tech: 1, cloud: 1, club: 1,
+  };
   const SAMPLE_JSON = '{\n  "mcpServers": {\n    "pkulaw-law-search": {\n      "url": "https://example.com/mcp",\n      "headers": { "Authorization": "Bearer <令牌>" }\n    },\n    "local-fs-tools": {\n      "command": "npx",\n      "args": ["-y", "@some/mcp-server"],\n      "tier": "eager"\n    }\n  }\n}';
   const IMPORT_PLACEHOLDER = '{\n  "mcpServers": {\n    "pkulaw-law-search": {\n      "url": "https://…/mcp",\n      "headers": { "Authorization": "Bearer …" }\n    }\n  }\n}';
 
@@ -222,9 +254,10 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     return prefixOf(entry.name);
   }
 
-  // 主机形状的组键（含 "."）→ 组名兜底直接显示主机，而不是"<前缀> 系列"。
+  // 主机形状的组键（含 "."，或 IPv6 括号字面量）→ 走主机路径：显示名取短名，而不是"<前缀> 系列"。
   function isHostKey(key) {
-    return /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(String(key || ""));
+    const text = String(key || "");
+    return /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(text) || /^\[[0-9A-Fa-f:.]+\]$/.test(text);
   }
 
   // 组键 → 厂商键：先看主机片段线索，再看组内成员的名字前缀（自建/老数据常见）。
@@ -240,7 +273,26 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     return "";
   }
 
-  // 组显示名：自定义组名 > 厂商中文名（兼容 v0.4.x 按名字前缀存的旧组名） > 主机名 / "<前缀> 系列"。
+  // 主机 → 可读短名（**组名兜底绝不能回落到整串网址**）：先摘掉公共后缀（近似，含 co.uk 这类
+  // 二层后缀），再跳过 mcp/api/gateway 这类"接入方式"子域，取剩下最靠左的一段。
+  // 例：mcp.tavily.com → tavily；api.githubcopilot.com → githubcopilot；plain-host → 自己。
+  function hostShortName(key) {
+    const host = String(key || "").trim().toLowerCase();
+    if (host === "" || host.indexOf(".") < 0) return host;
+    if (host.startsWith("[")) return host; // IPv6 字面量：没有可读主体，原样返回
+    const labels = host.split(".").filter((part) => part !== "");
+    if (labels.length === 0) return "";
+    let end = labels.length;
+    while (end > 1 && HOST_SUFFIX_LABEL[labels[end - 1]]) end--;
+    const core = labels.slice(0, end);
+    let start = 0;
+    while (core.length - start > 1 && HOST_NOISE_LABEL[core[start]]) start++;
+    return core[start] || "";
+  }
+
+  // 组显示名：自定义组名 > 厂商名（兼容 v0.4.x 按名字前缀存的旧组名） >
+  // 主机短名 + " 系列" / 非主机组键的 "<前缀> 系列"。
+  // v0.5.1 起不再把组键（端点主机）当显示名直接吐出来——那会在卡片标题位置显示整串域名。
   function groupTitle(key, members, groupMeta) {
     const own = groupMeta && groupMeta[key] && groupMeta[key].title;
     if (own) return String(own);
@@ -250,7 +302,9 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       if (legacy) return String(legacy);
       return VENDOR_LABEL[vendor] + " MCP";
     }
-    return isHostKey(key) ? String(key) : vendorLabel(key);
+    if (!isHostKey(key)) return vendorLabel(key);
+    const short = hostShortName(key);
+    return short === "" || short === String(key).toLowerCase() ? String(key) : short + " 系列";
   }
 
   // 成员行显示名：去掉名字自己的第一段。与组键无关——组键现在可能是主机，
@@ -1541,7 +1595,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     atoms: Object.keys(atoms),
     __test: {
       vendorLabel, endpointText, groupEntries, groupStats, groupSummary, exportPayload,
-      hostOfUrl, prefixOf, groupKeyOf, isHostKey, vendorOfGroup, groupTitle, shortNameOf,
+      hostOfUrl, prefixOf, groupKeyOf, isHostKey, hostShortName, vendorOfGroup, groupTitle, shortNameOf,
       statusText, statusDot, statusTone, importSummary, importRowText, groupIsOpen, toggleGroupOpen,
       components: {
         ManagerView, ManagerSection, ImportDialog, ConfirmDialog, NoticeAlert, ToolPanel,

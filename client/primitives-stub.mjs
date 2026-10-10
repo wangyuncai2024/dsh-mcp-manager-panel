@@ -12,8 +12,21 @@
 /** 真件导出的原子名（本文件实现）。 */
 export const ATOM_NAMES = ["Button", "Pill", "Tag", "StateDot", "Input", "Menu", "Modal", "Toast", "writeClipboard"];
 
-/** 真件导出的图标名（本文件实现为 data-icon 占位）。 */
+/**
+ * 真件导出的图标名（本文件实现为 data-icon 占位）。
+ * 客户端同时兼容两代命名：`...16/14`（旧）与 `...Regular`（DSH 4937343a5e 起）。
+ * 这份清单给的是新名字——替身只用新名字注册，从而验证客户端确实会回退到新名字。
+ */
 export const ICON_NAMES = [
+  "IconCheckOutlineRegular", "IconChevronDownOutlineRegular", "IconChevronUpOutlineRegular",
+  "IconCloseOutlineRegular", "IconCopyOutlineRegular", "IconDownloadOutlineRegular",
+  "IconEditOutlineRegular", "IconEllipsisOutlineRegular", "IconLinkOutlineRegular",
+  "IconPlusOutlineRegular", "IconRefreshOutlineRegular", "IconSearchOutlineRegular",
+  "IconTrashOutlineRegular", "IconWarningOutlineRegular",
+];
+
+/** 旧一代图标名：仅用于断言"两代名字客户端都能接"。 */
+export const ICON_NAMES_LEGACY = [
   "IconCheckOutline16", "IconChevronDownOutline14", "IconChevronUpOutline14", "IconCloseOutline16",
   "IconCopyOutline16", "IconDownloadOutline16", "IconEditOutline16", "IconEllipsisOutline16",
   "IconLinkOutline14", "IconPlusOutline16", "IconRefreshOutline16", "IconSearchOutline16",
@@ -23,12 +36,16 @@ export const ICON_NAMES = [
 /**
  * 造一份替身。
  * @param React react 模块（与客户端共用同一实例）。
+ * @param {{ legacyIcons?: boolean }} [options] legacyIcons=true 时只导出旧一代图标名
+ *   （`Icon*Outline16/14`），用来模拟改名前的 DSH 壳；默认只导出新一代
+ *   （`Icon*OutlineRegular`），模拟当前壳。
  * @returns {{ primitives: object, misses: string[], reads: string[] }} 替身模块、未实现读取记录、读取过的原子名。
  */
-export function createPrimitives(React) {
+export function createPrimitives(React, options = {}) {
   const h = React.createElement;
   const misses = [];
   const reads = [];
+  const icons = options.legacyIcons === true ? ICON_NAMES_LEGACY : ICON_NAMES;
 
   function Button(props) {
     const { variant = "ghost", size = "md", icon, children, ...rest } = props;
@@ -117,7 +134,7 @@ export function createPrimitives(React) {
   }
 
   const known = { Button, Pill, Tag, StateDot, Input, Menu, Modal, Toast, writeClipboard };
-  for (const name of ICON_NAMES) {
+  for (const name of icons) {
     known[name] = function Icon(props) {
       return h("svg", {
         "data-icon": name, className: props.className,
@@ -127,15 +144,17 @@ export function createPrimitives(React) {
   }
 
   const primitives = new Proxy(known, {
-    has: () => true,
+    has: (target, prop) => typeof prop === "string" && prop in target,
     get(target, prop) {
       if (typeof prop !== "string") return undefined;
       if (prop in target) {
         reads.push(prop);
         return target[prop];
       }
+      // 真件缺键就是 undefined（不是"会渲染出东西的函数"）。这里如实返回 undefined，
+      // 否则客户端的"试一个名字、没有再试另一个"回退链永远命中第一个，测不出真实行为。
       misses.push(prop);
-      return function Missing() { return null; };
+      return undefined;
     },
   });
 
