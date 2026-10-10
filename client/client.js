@@ -184,12 +184,81 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
   };
   const TIER_TITLE = "档位：eager=随启动自动连接｜on-demand=点“连接”再连｜disabled=停用";
   const VENDOR_LABEL = { pkulaw: "北大法宝", yuandian: "原点法律数据" };
+  // 厂商识别补充线索：端点主机片段 → 厂商键。组键改成主机后，仍能给出中文厂商名。
+  const VENDOR_HOST_HINT = { pkulaw: ["pkulaw"], yuandian: ["chineselaw", "yuandian"] };
   const SAMPLE_JSON = '{\n  "mcpServers": {\n    "pkulaw-law-search": {\n      "url": "https://example.com/mcp",\n      "headers": { "Authorization": "Bearer <令牌>" }\n    },\n    "local-fs-tools": {\n      "command": "npx",\n      "args": ["-y", "@some/mcp-server"],\n      "tier": "eager"\n    }\n  }\n}';
   const IMPORT_PLACEHOLDER = '{\n  "mcpServers": {\n    "pkulaw-law-search": {\n      "url": "https://…/mcp",\n      "headers": { "Authorization": "Bearer …" }\n    }\n  }\n}';
 
   // ── 纯函数（供 UI 与开发冒烟测试复用）──────────────────────────────────
   function vendorLabel(prefix) {
     return VENDOR_LABEL[prefix] ? VENDOR_LABEL[prefix] + " MCP" : prefix + " 系列";
+  }
+
+  // URL → 主机名（小写；去用户信息与端口，IPv6 保留括号）。解析不出来返回 ""。
+  function hostOfUrl(url) {
+    const m = /^[A-Za-z][A-Za-z0-9+.-]*:\/\/([^/?#]*)/.exec(String(url || "").trim());
+    if (!m) return "";
+    const authority = m[1];
+    const at = authority.lastIndexOf("@");
+    const hostPort = at >= 0 ? authority.slice(at + 1) : authority;
+    if (hostPort === "") return "";
+    const host = hostPort.startsWith("[") ? hostPort.slice(0, hostPort.indexOf("]") + 1) : hostPort.split(":")[0];
+    return host.toLowerCase();
+  }
+
+  // 名字前缀（第一个 - 之前）；空名 → "other"。
+  function prefixOf(name) {
+    return String(name || "").split("-")[0] || "other";
+  }
+
+  // 组键：streamable-http 按**端点主机**归组——同一个网关下的服务天然属于同一厂商，
+  // 服务商给的名字怎么变都不会散开；没有可用 url 的条目（stdio 等）才退回名字前缀。
+  function groupKeyOf(entry) {
+    if (!entry) return "other";
+    if (entry.transport !== "stdio") {
+      const host = hostOfUrl(entry.url);
+      if (host !== "") return host;
+    }
+    return prefixOf(entry.name);
+  }
+
+  // 主机形状的组键（含 "."）→ 组名兜底直接显示主机，而不是"<前缀> 系列"。
+  function isHostKey(key) {
+    return /^[A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+$/.test(String(key || ""));
+  }
+
+  // 组键 → 厂商键：先看主机片段线索，再看组内成员的名字前缀（自建/老数据常见）。
+  function vendorOfGroup(key, members) {
+    const text = String(key || "").toLowerCase();
+    for (const vendor of Object.keys(VENDOR_HOST_HINT)) {
+      if (VENDOR_HOST_HINT[vendor].some((needle) => text.indexOf(needle) >= 0)) return vendor;
+    }
+    for (const member of members || []) {
+      const prefix = prefixOf(member && member.name);
+      if (VENDOR_LABEL[prefix]) return prefix;
+    }
+    return "";
+  }
+
+  // 组显示名：自定义组名 > 厂商中文名（兼容 v0.4.x 按名字前缀存的旧组名） > 主机名 / "<前缀> 系列"。
+  function groupTitle(key, members, groupMeta) {
+    const own = groupMeta && groupMeta[key] && groupMeta[key].title;
+    if (own) return String(own);
+    const vendor = vendorOfGroup(key, members);
+    if (vendor) {
+      const legacy = groupMeta && groupMeta[vendor] && groupMeta[vendor].title;
+      if (legacy) return String(legacy);
+      return VENDOR_LABEL[vendor] + " MCP";
+    }
+    return isHostKey(key) ? String(key) : vendorLabel(key);
+  }
+
+  // 成员行显示名：去掉名字自己的第一段。与组键无关——组键现在可能是主机，
+  // 老实现用 entry.name.slice(prefix.length + 1) 会切出乱码。
+  function shortNameOf(name) {
+    const text = String(name || "");
+    const dash = text.indexOf("-");
+    return dash > 0 && dash < text.length - 1 ? text.slice(dash + 1) : text;
   }
 
   function endpointText(entry) {
@@ -220,22 +289,22 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     return "neutral";
   }
 
-  // 按名称前缀分组：同前缀（第一个 - 之前）自动归组（含仅 1 个成员的情况，
-  // 统一显示厂商卡片头）；"other"（无有效前缀）才平铺为单条。
+  // 分组：按组键（端点主机 / 名字前缀）聚合（含仅 1 个成员的情况，统一显示厂商卡片头）；
+  // 只有空名落到 "other" 才平铺为单条。
   function groupEntries(entries) {
-    const byPrefix = {};
+    const byKey = {};
     for (const entry of entries) {
-      const prefix = String(entry.name || "").split("-")[0] || "other";
-      if (!byPrefix[prefix]) byPrefix[prefix] = [];
-      byPrefix[prefix].push(entry);
+      const key = groupKeyOf(entry);
+      if (!byKey[key]) byKey[key] = [];
+      byKey[key].push(entry);
     }
     const items = [];
-    for (const prefix of Object.keys(byPrefix).sort()) {
-      const members = byPrefix[prefix];
-      if (prefix !== "other") {
-        items.push({ kind: "group", prefix, members });
+    for (const key of Object.keys(byKey).sort()) {
+      const members = byKey[key];
+      if (key !== "other") {
+        items.push({ kind: "group", prefix: key, members });
       } else {
-        for (const single of members) items.push({ kind: "single", prefix, entry: single });
+        for (const single of members) items.push({ kind: "single", prefix: key, entry: single });
       }
     }
     return items;
@@ -501,13 +570,12 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
 
   // 服务分组卡：组头（折叠按钮 + 状态点 + 组名 + 服务数）+ 摘要 + 动作（档位/全部连接/⋯ 菜单）。
   function GroupCard(props) {
-    const { prefix, members, opts } = props;
+    const { prefix, members, opts } = props; // prefix = 组键（v0.5.0 起通常是端点主机）
     const sorted = members.slice().sort((a, b) => (a.name < b.name ? -1 : 1));
     const stats = groupStats(sorted);
     const open = opts.isOpen(prefix);
     const busy = opts.applyingGroup === prefix;
-    const label = (opts.groupMeta && opts.groupMeta[prefix] && opts.groupMeta[prefix].title)
-      ? String(opts.groupMeta[prefix].title) : vendorLabel(prefix);
+    const label = groupTitle(prefix, sorted, opts.groupMeta);
     const editing = opts.editingTitle === prefix;
     const panelId = "mpm-members-" + prefix;
     const connected = stats.connectedCount === sorted.length;
@@ -589,7 +657,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       ? h("div", { className: "mpm-members", id: panelId, key: "b" }, sorted.map((entry) => h(MemberItem, {
         key: entry.name,
         entry,
-        shortName: entry.name.slice(prefix.length + 1),
+        shortName: shortNameOf(entry.name),
         opts,
       })))
       : null;
@@ -675,15 +743,27 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     ]);
   }
 
-  // 导入结果摘要（宿主 rows[].status: added / updated / error）。
+  // 导入结果摘要 / 单行文案（宿主 rows[].status: added / updated / duplicate / error）。
   function importSummary(result) {
     const rows = result && Array.isArray(result.rows) ? result.rows : [];
     const added = rows.filter((row) => row.status === "added").length;
     const updated = rows.filter((row) => row.status === "updated").length;
+    const skipped = rows.filter((row) => row.status === "duplicate").length;
     const failed = rows.filter((row) => row.status === "error").length;
     const parts = ["新增 " + added, "更新 " + updated];
+    if (skipped > 0) parts.push("跳过重复 " + skipped);
     if (failed > 0) parts.push("失败 " + failed);
-    return { rows, added, updated, failed, title: "导入结果：" + parts.join(" · ") };
+    return { rows, added, updated, skipped, failed, title: "导入结果：" + parts.join(" · ") };
+  }
+
+  function importRowText(row) {
+    if (row.status === "error") return String(row.error || "失败");
+    if (row.status === "added") return "新增";
+    if (row.status === "updated") return "更新";
+    if (row.status === "duplicate") {
+      return "跳过 · 与已有条目 " + String(row.duplicateOf || "（同端点）") + " 指向同一端点";
+    }
+    return String(row.status || "");
   }
 
   function ImportDialog(props) {
@@ -720,9 +800,11 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
         }, [
           row.status === "error"
             ? h(IconWarningOutline16, { key: "i", size: 14 })
-            : h(IconCheckOutline16, { key: "i", size: 14 }),
+            : row.status === "duplicate"
+              ? h(IconCopyOutline16, { key: "i", size: 14 })
+              : h(IconCheckOutline16, { key: "i", size: 14 }),
           h("code", { key: "n" }, row.name),
-          h("span", { key: "s" }, row.status === "error" ? row.error : row.status === "added" ? "新增" : "更新"),
+          h("span", { key: "s" }, importRowText(row)),
         ]))),
       ]));
     }
@@ -731,7 +813,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       onClose,
       title: "添加新的 MCP 服务",
       closeLabel: "关闭",
-      description: "粘贴服务商给的 mcpServers JSON（Claude/Cursor 格式）：同名条目更新，同前缀自动归组；eager 项导入后自动连接。",
+      description: "粘贴服务商给的 mcpServers JSON（Claude/Cursor 格式）：同名条目更新，同前缀自动归组；同一端点（url+凭证 / command+参数相同）换个名字再导入会被判为重复并跳过；eager 项导入后自动连接。",
       className: "mpm-dialog mpm-dialog-wide",
       contentClassName: "mpm-dialog-content",
       footer: [
@@ -833,11 +915,12 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       openGroups: prev.openGroups,
     }));
 
-    const onCopy = async (label, text) => {
+    // note 省略时按"已复制：<内容>"提示；内容很长（主机组的逐条前缀）时传自定义提示。
+    const onCopy = async (text, note) => {
       const ok = await writeClipboard(text);
       setCopied(text);
       setTimeout(() => setCopied((prev) => (prev === text ? "" : prev)), 2000);
-      if (ok) onToast("已复制：" + text);
+      if (ok) onToast(note && note !== text ? note : "已复制：" + text);
     };
 
     const openImport = () => {
@@ -854,9 +937,16 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
         setImportResult(result);
         setImportText("");
         const summary = importSummary(result);
-        if (summary.failed > 0) {
-          onAlert("导入完成，但有 " + summary.failed + " 条失败（成功 " + (summary.added + summary.updated) + " 条）：",
-            summary.rows.filter((row) => row.status === "error").map((row) => row.name + "：" + row.error));
+        const errorRows = summary.rows.filter((row) => row.status === "error");
+        const dupRows = summary.rows.filter((row) => row.status === "duplicate");
+        if (summary.failed > 0 || summary.skipped > 0) {
+          const notes = [];
+          for (const row of errorRows) notes.push(row.name + "：" + row.error);
+          for (const row of dupRows) notes.push(row.name + " → 与 " + (row.duplicateOf || "已有条目") + " 同端点，未新增");
+          const headline = "导入完成（新增 " + summary.added + " · 更新 " + summary.updated + "）"
+            + (summary.skipped > 0 ? "；跳过 " + summary.skipped + " 条同端点重复" : "")
+            + (summary.failed > 0 ? "；失败 " + summary.failed + " 条" : "") + "：";
+          onAlert(headline, notes);
         } else {
           onToast("导入完成：" + summary.title.replace("导入结果：", "") + "（写盘即生效，eager 项自动连接）");
         }
@@ -913,12 +1003,23 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
           setEditingTitle(prefix);
           setTitleDraft(current);
         } else if (id === "copy") {
-          onCopy("mcp__" + prefix + "__*", "mcp__" + prefix + "__*");
+          if (isHostKey(prefix)) {
+            // 组键是端点主机 → 没有“组前缀”可复制，逐条给出成员的工具前缀。
+            const exprs = [];
+            for (const member of members) {
+              const expr = "mcp__" + member.name + "__*";
+              if (exprs.indexOf(expr) < 0) exprs.push(expr);
+            }
+            onCopy(exprs.join("\n"), exprs.length === 1
+              ? "已复制：" + exprs[0]
+              : "已复制该组 " + exprs.length + " 个服务的工具前缀（每行一个）");
+          } else {
+            onCopy("mcp__" + prefix + "__*", "mcp__" + prefix + "__*");
+          }
         } else if (id === "unload") {
           onGroupUnload(prefix, members);
         } else if (id === "delete") {
-          const meta = groupMeta && groupMeta[prefix];
-          setConfirm({ kind: "group", prefix, label: meta && meta.title ? String(meta.title) : vendorLabel(prefix), members });
+          setConfirm({ kind: "group", prefix, label: groupTitle(prefix, members, groupMeta), members });
         }
       },
       onEditTitle: (prefix) => {
@@ -1093,9 +1194,8 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       setNotice({ kind: "err", seq: noticeSeq.current, text, details });
     }
 
-    function groupLabel(prefix) {
-      const meta = groupsMeta && groupsMeta[prefix];
-      return meta && meta.title ? String(meta.title) : vendorLabel(prefix);
+    function groupLabel(prefix, members) {
+      return groupTitle(prefix, members, groupsMeta);
     }
 
     async function onSetGroupTitle(prefix, title) {
@@ -1152,7 +1252,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
       } finally {
         setApplyingGroup("");
       }
-      const label = groupLabel(prefix);
+      const label = groupLabel(prefix, members);
       if (failed.length > 0) showError("「" + label + "」整组档位部分失败（成功 " + ok + " 条）：", failed);
       else showToast("「" + label + "」整组档位已设为 " + TIER_TEXT[tier] + "（" + ok + " 个服务）");
       refresh(true);
@@ -1179,7 +1279,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
           failed.push(member.name + "：" + errText(err));
         }
       }
-      const label = groupLabel(prefix);
+      const label = groupLabel(prefix, members);
       if (failed.length > 0) showError("「" + label + "」删除部分失败：", failed);
       else showToast("已删除「" + label + "」整组（" + ok + " 个服务）");
       try {
@@ -1228,7 +1328,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
         }
       }
       setApplyingGroup("");
-      const label = groupLabel(prefix);
+      const label = groupLabel(prefix, members);
       if (failed.length > 0) showError("「" + label + "」部分连接失败（成功 " + ok + " 条）：", failed);
       else showToast("「" + label + "」全部连接成功（" + ok + " 个服务）");
       refresh(true);
@@ -1242,7 +1342,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
         } catch { /* 忽略单条断开失败 */ }
       }
       setApplyingGroup("");
-      showToast("「" + groupLabel(prefix) + "」已全部断开");
+      showToast("「" + groupLabel(prefix, members) + "」已全部断开");
       refresh(true);
     }
 
@@ -1365,6 +1465,7 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     ".mpm-result-row code{font-family:var(--ds-font-family-code);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}",
     ".mpm-result-row[data-status=\"error\"]{color:var(--dsw-alias-state-error-primary);}",
     ".mpm-result-row[data-status=\"added\"],.mpm-result-row[data-status=\"updated\"]{color:var(--dsw-alias-state-success-primary);}",
+    ".mpm-result-row[data-status=\"duplicate\"]{color:var(--dsw-alias-state-warn-primary);}",
     ".mpm-danger:not(:disabled){border-color:var(--dsw-alias-state-error-primary);color:var(--dsw-alias-state-error-primary);}",
     ".mpm-danger:hover:not(:disabled){background:var(--dsw-alias-interactive-bg-hover-danger);}",
     ".mpm-visually-hidden{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);clip-path:inset(50%);white-space:nowrap;}",
@@ -1440,7 +1541,8 @@ window.__ModuleLoader__.load({ id: "dsh-mcp-manager-panel", factory: (require) =
     atoms: Object.keys(atoms),
     __test: {
       vendorLabel, endpointText, groupEntries, groupStats, groupSummary, exportPayload,
-      statusText, statusDot, statusTone, importSummary, groupIsOpen, toggleGroupOpen,
+      hostOfUrl, prefixOf, groupKeyOf, isHostKey, vendorOfGroup, groupTitle, shortNameOf,
+      statusText, statusDot, statusTone, importSummary, importRowText, groupIsOpen, toggleGroupOpen,
       components: {
         ManagerView, ManagerSection, ImportDialog, ConfirmDialog, NoticeAlert, ToolPanel,
         TierPicker, StatusTag, SearchField, StatsLine, EmptyState, SkeletonList,

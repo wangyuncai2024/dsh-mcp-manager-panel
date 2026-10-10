@@ -6,10 +6,10 @@ DSH（DeepSeek Harness）的 **MCP 服务管理面板**（宿主级打包插件�
 
 ## 功能
 
-- **粘贴导入**：顶栏"导入配置"打开弹层，粘贴 `{ "mcpServers": { 名称: { url / command, headers, env, args, cwd, tier, disabled } } }`（也可不带外层 `mcpServers`）；弹层内实时给出**新增 / 更新 / 失败**计数与逐条结果，重复名称=更新，单条失败不阻断其余条目。
+- **粘贴导入**：顶栏"导入配置"打开弹层，粘贴 `{ "mcpServers": { 名称: { url / command, headers, env, args, cwd, tier, disabled } } }`（也可不带外层 `mcpServers`）；弹层内实时给出**新增 / 更新 / 跳过重复 / 失败**计数与逐条结果，重复名称=更新，**同一端点换了名字再导入=跳过**（见下），单条失败不阻断其余条目。
 - **界面与 DSH 设置面板一致**：客户端复用平台 seed 模块 `@deepseek-ai/dsh-client-ui-primitives` 的原子件（`Button` / `Pill` / `Tag` / `StateDot` / `Menu` / `Modal` / `Toast` / 图标集），版式沿用设置页约定（`max-width 760` + `h2 18/600` + 13px 三级色导语 + 0.5px 中性描边卡片 + `--dsw-alias-*` 语义 token）；明暗主题、聚焦环、圆角与滚动条都由产品主题统一接管。
 - **自足连接**：`eager`（随 DSH 启动自动连接并注册工具）/ `on-demand`（点"连接"或重启前手动加载）/ `disabled`（停用并立即断开）。传输用 `@modelcontextprotocol/sdk`，支持 **stdio** 与 **streamable-http**（SSE 由 SDK 处理）。
-- **厂商分组**：名称同前缀（第一个 `-` 之前）自动成组，**含仅 1 个成员的情况**——同样显示厂商卡片头（状态点 + 名称 + 成员数 + 摘要行）；真正的"单条平铺"只留给前缀为 `other` 的条目。组头状态点按组聚合（未连接灰 / 连接中琥珀 / 已有成员连接绿 / 有失败红），**打开面板时所有组一律默认收起**（单成员组同样收起，不再有"单成员自动展开、多成员折叠"两套默认），点组头展开、顶栏"全部展开 / 全部收起"批量切换；组头行内是"整组档位 + 全部连接"，其余动作（**重命名组**、复制调用前缀、全部断开、删除整组）收进 `⋯` 溢出菜单（产品 `Menu`，portal 到 body，不会被滚动容器裁切）。组名改名写 `groups.json` 持久化，只改显示不影响前缀分组，回车保存 / Esc 取消。
+- **厂商分组（v0.5.0 起按端点主机）**：分组键是 **url 主机**（`streamable-http` 取端点主机；stdio 等没有 url 的条目退回名字前缀），所以**同一个网关下的服务不管叫什么名字都在同一张卡**（如 `pkulaw-law-search`、`mcp-law-agg`、`law_recognition` 全都进「北大法宝 MCP」）；**含仅 1 个成员的情况**——同样显示厂商卡片头（状态点 + 名称 + 成员数 + 摘要行）；真正的"单条平铺"只留给空名条目。组头状态点按组聚合（未连接灰 / 连接中琥珀 / 已有成员连接绿 / 有失败红），**打开面板时所有组一律默认收起**（单成员组同样收起，不再有"单成员自动展开、多成员折叠"两套默认），点组头展开、顶栏"全部展开 / 全部收起"批量切换；组头行内是"整组档位 + 全部连接"，其余动作（**重命名组**、复制调用前缀、全部断开、删除整组）收进 `⋯` 溢出菜单（产品 `Menu`，portal 到 body，不会被滚动容器裁切）。组名改名写 `groups.json`（键 = 组键）持久化，只改显示不影响分组，回车保存 / Esc 取消；显示名优先用自定义名，其次按主机片段 / 成员名字前缀命中厂商中文名，认不出来就直接显示主机名。主机组没有"组前缀"可复制，`⋯ → 复制调用前缀` 会逐行给出成员的工具前缀。
 - **两级档位**：组头三段 `Pill` = 整组一键 `eager` / `on-demand` / `disabled`；展开后每行可单独调（写盘即热生效：eager 立即后台连接、disabled 立即断开）。
 - **连接管理**：每行"连接/断开 + 状态 `Tag`"（已连接 · N 工具 / 连接中 / 连接失败，失败可展开错误详情）；连接成功会把工具快照/服务版本回写注册表；页面每 5s 轻量轮询同步连接状态。
 - **工具浏览**：点击"N 工具" `Pill` 展开内嵌详情面板，可一键复制 `mcp__<名称>__<工具>` 或整组前缀（复制带 ✓ 反馈）。
@@ -17,6 +17,28 @@ DSH（DeepSeek Harness）的 **MCP 服务管理面板**（宿主级打包插件�
 - **反馈与确认**：成功提示走产品 `Toast`（顶部居中、自动淡出），失败保留可关闭的行内告警并列出逐条明细；删除单条/整组走产品 `Modal` 二次确认；列表加载用 `bg-skeleton` 骨架屏。
 
 ## 已知问题修复
+
+- **v0.5.0 — 同一厂商的服务被拆成好几张卡，「mcp 系列」莫名其妙独立**：分组键原先取**条目名字里第一个
+  `-` 之前的那段**（`name.split("-")[0]`），纯粹是名字启发式，插件既不看 url 也不认厂商。于是
+  `mcp-law-agg` 因前缀是 `mcp` 单独成了「mcp 系列」；`law_recognition` / `add-doc-link` /
+  `case_number_recognition` / `pku_citation_validator` 这些**名字里没有连字符**的条目切不出前缀，
+  各自成了一张卡（`add 系列`、`law_recognition 系列`…）——第一次导入 14 个北大服务因此散成 6 张卡。
+  现在分组键改为**端点主机**：`streamable-http` 取 url 主机（小写、去端口与用户信息、IPv6 保留括号），
+  同一个网关下的服务天然同组；stdio 等无 url 的条目才退回名字前缀。组显示名依次取
+  自定义名 → 厂商中文名（新增 `VENDOR_HOST_HINT` 主机片段映射，兼容按成员名字前缀命中）→ 主机名直显；
+  `groups.json` 里旧的前缀键组名仍会回退生效（不丢已有自定义名）。本机实测：15 条 → **2 张卡**
+  （北大法宝 14 条 · 元典 1 条）。回归测试：`node client/render-smoke.mjs` 的分组断言。
+
+- **v0.4.3 — 同一服务被导入两次 → 界面出现"两个名字的同一端点"**：导入原先**只按 `name` 匹配**，
+  而服务商在不同批次里给的 server 名并不一致（例如第一次 `mcp-law` / `mcp-case`，第二次同一批端点叫
+  `pkulaw-law-keyword` / `pkulaw-case-keyword`）。两次导入于是落下 2 套条目：同一端点被连两遍、工具在会话里
+  成对出现（`mcp__mcp-law__get_law_list` 与 `mcp__pkulaw-law-keyword__get_law_list` 同时存在），
+  界面里同名服务还散落在「北大法宝 MCP」与「mcp 系列」两个组。现在导入会对每条候选算**端点签名**
+  （`streamable-http` = url + headers；`stdio` = command + args + cwd + env，键按小写比较），
+  签名已存在且名字不同 → 判 `duplicate`，**跳过不写盘、不连接**，弹层里单列并指回已有条目名；
+  同名照旧更新，同端点换 token（headers 不同）、env 不同仍算独立条目。
+  回归测试：`node client/import-dedupe-smoke.mjs`（25 项，抽取真实 `importText` 跑临时注册表）。
+  注：这是**宿主代码**改动，需重载插件/重启对应 profile 才生效（刷新页面不够）。
 
 - **v0.4.2 — 点"连接"报 `untrusted origin`（成功 0 条）**：宿主写路由 `/mcp-panel/load` 的同源守卫
   在 `Origin` 头缺失时一律返回 `403 {"ok":false,"error":"untrusted origin"}`，导致经**桌面壳 / 反向代理 /
@@ -91,6 +113,9 @@ pnpm add "file:C:/路径/dsh-mcp-manager-panel"
   同时跑"有 ui-primitives"与"缺 ui-primitives（退化实现）"两条路径，断言结构/文案/无 React key 警告，
   并交叉校验所读原子名确实由 `ui-primitives` 导出（找不到 DSH 检出时自动跳过该校验）。
   需要 React：见 `AGENTS.md` 的跑法（react / react-dom 从当前工作目录解析）。
+- 导入去重冒烟测试（开发用，不进包，无 React 依赖）：`node client/import-dedupe-smoke.mjs`
+  —— 从 `lib/index.js` 抽取真实的 `createHandlers`（`importText` / `save` / `list`）跑临时注册表，
+  覆盖同名更新、换名字同端点判重、headers/env 键大小写、同批内去重、stdio 与 error 分支。
 - 宿主：`lib/index.js` = 注册表读写 + SDK MCP 运行时（`lib/index.js` 内 `createMcpManager`）+ 同源 HTTP 路由
   `/mcp-panel/list`(GET)、`/mcp-panel/import|save|load|unload|status`(POST)；POST 校验 `Origin`；`webServer` 是惰性服务，
   用 `ctx.inject(['webServer'], …)` 等它就绪。
@@ -130,3 +155,11 @@ pnpm add "file:C:/路径/dsh-mcp-manager-panel"
 - v0.4.1：组展开默认值统一——打开面板时**所有组一律收起**（此前单成员组默认展开，导致 tavily、元典收起态
   与北大法宝等多成员组不一致）；组头点击只翻转该组，顶栏"全部展开"后再收起单组不会连带收起其余组
   （批量态先固化成逐组显式状态）。展开逻辑抽成纯函数 `groupIsOpen` / `toggleGroupOpen` 并由冒烟测试覆盖。
+- v0.4.3：导入按**端点签名**去重（`streamable-http` = url + headers，`stdio` = command + args + cwd + env，
+  键小写比较）：签名命中且名字不同 → `duplicate` 跳过、不写盘不连接，弹层单列并指回已有条目名
+  （此前只按 name 匹配，服务商换一套名字再导就会把同一端点连两遍、工具成对出现）；
+  同名更新、同端点换 token / 换 env 仍视为独立条目。新增 `client/import-dedupe-smoke.mjs`。
+- v0.5.0：分组键从"名字前缀"改为**端点主机**（`groupKeyOf` / `hostOfUrl`），组名解析抽成
+  `groupTitle`（自定义名 → 厂商中文名 → 主机名，兼容旧的前缀键组名），成员行显示名改由
+  `shortNameOf(name)` 计算（不再用组键切名字）；成员行显示名、`⋯ → 复制调用前缀`（主机组改为逐行列出）
+  与宿主 `setGroupTitle` 校验（新增 `GROUP_RE`，允许主机名里的 `.` `:`）同步调整。

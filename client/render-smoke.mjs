@@ -134,6 +134,36 @@ assert(T.groupEntries([{ name: "simplename" }])[0].kind === "group", "无连字�
 const gOther = T.groupEntries([{ name: "" }]);
 assert(gOther.length === 1 && gOther[0].kind === "single" && gOther[0].prefix === "other", "空名称归入 other 单条");
 
+// ── 组键 = 端点主机（v0.5.0）──────────────────────────────────────────────
+// 同一个网关下的服务，名字起得再乱（pkulaw-* / mcp-* / 无连字符）也必须归同一组。
+const hostG = T.groupEntries([
+  { name: "pkulaw-law-search", transport: "streamable-http", url: "https://apim-gateway.pkulaw.com/mcp-law-search-service" },
+  { name: "mcp-law-agg", transport: "streamable-http", url: "https://apim-gateway.pkulaw.com/mcp-law-agg/mcp" },
+  { name: "law_recognition", transport: "streamable-http", url: "https://apim-gateway.pkulaw.com/law_recognition" },
+  { name: "yuandian-open-platform", transport: "streamable-http", url: "https://open.chineselaw.com/mcp" },
+  { name: "local-tools", transport: "stdio", command: "npx", args: ["-y", "@a/b"] },
+]);
+assert(hostG.length === 3 && hostG.every((i) => i.kind === "group"), "按主机分组：网关 1 组 + 元典 1 组 + stdio 前缀 1 组");
+const pkHostGroup = hostG.find((i) => i.prefix === "apim-gateway.pkulaw.com");
+assert(pkHostGroup && pkHostGroup.members.length === 3, "名字完全不同仍归同一主机组（pkulaw-* / mcp-* / 无连字符）");
+assert(hostG.find((i) => i.prefix === "open.chineselaw.com").members.length === 1, "元典端点自成一组");
+assert(hostG.find((i) => i.prefix === "local").kind === "group", "stdio 无 url → 退回名字前缀");
+assert(T.groupKeyOf({ name: "a-b", transport: "streamable-http", url: null }) === "a", "http 缺 url → 退回名字前缀");
+assert(T.hostOfUrl("https://User:pw@Example.COM:8443/path") === "example.com" && T.hostOfUrl("not a url") === "",
+  "hostOfUrl：去用户信息与端口、小写、非法输入返回空");
+assert(T.hostOfUrl("http://[::1]:8080/mcp") === "[::1]", "hostOfUrl：IPv6 保留括号");
+
+// 组显示名：主机键 → 厂商中文名；认不出厂商就显示主机；旧的前缀键自定义名继续生效。
+assert(T.groupTitle("apim-gateway.pkulaw.com", pkHostGroup.members, {}) === "北大法宝 MCP", "主机组 → 厂商中文名");
+assert(T.groupTitle("apim-gateway.pkulaw.com", pkHostGroup.members, { "apim-gateway.pkulaw.com": { title: "北大法宝" } }) === "北大法宝",
+  "自定义组名优先于厂商自动名");
+assert(T.groupTitle("open.chineselaw.com", [{ name: "yuandian-open-platform" }], { yuandian: { title: "华宇元典法律连接器" } }) === "华宇元典法律连接器",
+  "组名兼容：v0.4.x 按名字前缀存的旧组名仍然生效");
+assert(T.groupTitle("mcp.internal", [{ name: "foo-bar" }], {}) === "mcp.internal", "认不出厂商的主机组直接显示主机名");
+assert(T.groupTitle("local", [{ name: "local-tools" }], {}) === "local 系列", "非主机组键仍走 <前缀> 系列");
+assert(T.shortNameOf("pkulaw-law-search") === "law-search" && T.shortNameOf("law_recognition") === "law_recognition",
+  "成员显示名：去掉名字自己第一段（不再依赖组键，主机键也不会切出乱码）");
+
 assert(T.groupIsOpen("local", null, {}) === false && T.groupIsOpen("local", null, { local: true }) === true,
   "组展开：默认全部收起，只有显式展开过才打开");
 assert(T.groupIsOpen("local", true, {}) === true && T.groupIsOpen("local", false, { local: true }) === false,
@@ -178,6 +208,12 @@ assert(T.groupSummary("local", 1, localStats) === "local · 按需档 · 未连�
 const sum = T.importSummary({ rows: [{ status: "added" }, { status: "added" }, { status: "error" }] });
 assert(sum.added === 2 && sum.failed === 1 && sum.title === "导入结果：新增 2 · 更新 0 · 失败 1", "importSummary 计数与标题");
 assert(T.importSummary(null).title === "导入结果：新增 0 · 更新 0", "importSummary 空结果");
+// 同端点换名字导入会被宿主判为 duplicate：计数进"跳过重复"，行文案点出与谁重复。
+const sumDup = T.importSummary({ rows: [{ status: "added" }, { status: "duplicate" }, { status: "duplicate" }, { status: "error" }] });
+assert(sumDup.skipped === 2 && sumDup.title === "导入结果：新增 1 · 更新 0 · 跳过重复 2 · 失败 1", "importSummary：重复条目计入跳过");
+assert(T.importRowText({ status: "duplicate", duplicateOf: "mcp-law" }) === "跳过 · 与已有条目 mcp-law 指向同一端点", "importRowText：重复行文案");
+assert(T.importRowText({ status: "duplicate" }).includes("同端点"), "importRowText：缺 duplicateOf 时仍可读");
+assert(T.importRowText({ status: "error", error: "需要 url" }) === "需要 url" && T.importRowText({ status: "added" }) === "新增", "importRowText：错误与新增文案");
 
 const viewProps = {
   entries, path: "/home/user/.dsh/skill-mcp-manager/registry.json",
@@ -327,6 +363,14 @@ const importResult = render(h(C.ImportDialog, {
   error: "",
 }));
 assert(importResult.includes("导入结果：新增 1 · 更新 0 · 失败 1") && importResult.includes("需要 url"), "导入弹层：结果明细（新增/更新/失败计数）");
+const importDup = render(h(C.ImportDialog, {
+  open: true, onClose: noop, text: "", onText: noop, onImport: noop,
+  importing: false, refreshing: false, onRefresh: noop, showSample: false, onToggleSample: noop,
+  result: { entryCount: 1, rows: [{ name: "pkulaw-law-keyword", status: "duplicate", duplicateOf: "mcp-law" }] },
+  error: "",
+}));
+assert(importDup.includes("跳过重复 1") && importDup.includes('data-status="duplicate"') && importDup.includes("mcp-law"),
+  "导入弹层：重复条目单列并指回已有条目");
 
 const confirmRow = render(h(C.ConfirmDialog, { confirm: { kind: "row", name: "a-b" }, busy: false, onCancel: noop, onConfirm: noop }));
 assert(confirmRow.includes("删除 MCP 服务") && confirmRow.includes("「a-b」") && confirmRow.includes("mpm-danger"), "删除单条确认弹层");

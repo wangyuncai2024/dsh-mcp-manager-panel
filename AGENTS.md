@@ -2,7 +2,7 @@
 
 给接手继续开发的 AI / 开发者。改代码前先读本文件 + README.md。
 
-## 是什么（v0.4.0 自足版 · UI 对齐 DSH 设置面板）
+## 是什么（v0.5.0 自足版 · UI 对齐 DSH 设置面板）
 
 DSH 宿主级打包插件的 **MCP 服务管理面板 + MCP 运行时一体**：
 - **Host**：`lib/index.js`（ESM）。读写权威注册表 `<dataDir>/registry.json`，用
@@ -19,6 +19,24 @@ DSH 宿主级打包插件的 **MCP 服务管理面板 + MCP 运行时一体**：
 - **注册表格式与能力库完全对齐**：`{ version: 1, entries: [] }`，条目字段同能力库 `buildEntry`
   （含 `tools` 工具快照、`disabledTools`、`systemEntryId: mcp-<name>`、`managed: true` 等）。
 - **名称约束**：`name` 匹配 `^[A-Za-z0-9_-]{1,32}$`（拼进 `mcp__<name>__<tool>` 命名空间，同一时间只连一次）。
+- **导入按"端点签名"去重（v0.4.3，勿退回纯 name 匹配）**：`importText` 里同名 → 更新；
+  不同名但签名相同 → `rows[].status = "duplicate"` 并**跳过不写盘**（返回 `duplicateOf`）。
+  签名 = `endpointSignature()`：`streamable-http` 取 `url + headers`，`stdio` 取 `command + args + cwd + env`，
+  headers/env 的键按小写比较、值原样 —— 所以"同端点换 token / 换 env"仍是两条独立条目（一名一端点挂两套凭证）。
+  同一个导入批次内部也去重（先到者保留）；同名条目改 url 时签名索引要跟着摘旧登新。
+  背景：服务商两次给的 server 名不同（`mcp-law` vs `pkulaw-law-keyword`）却指向同一端点，纯 name 匹配会
+  把同一服务连两遍、工具在会话里成对出现、界面里同名服务散落在两个前缀组。回归测试见下节。
+- **分组键 = 端点主机（v0.5.0，勿退回纯名字前缀）**：`groupKeyOf()`——`streamable-http` 取 url 主机
+  （`hostOfUrl`：小写、去端口与用户信息、IPv6 保留括号），没有可用 url 的（stdio）才退回名字前缀
+  （第一个 `-` 之前），空名落 `other`（唯一平铺成单条的路径）。组显示名 `groupTitle()`：自定义组名 >
+  厂商中文名（`VENDOR_HOST_HINT` 主机片段 → `VENDOR_LABEL`；也可由组内成员的名字前缀命中）>
+  主机名直显 / `<前缀> 系列`。`groups.json` 的键 v0.5.0 起是主机，但**旧的按名字前缀存的键仍会回退查询**
+  （本机 `yuandian` → 华宇元典法律连接器）。宿主 `setGroupTitle` 校验组键用 `GROUP_RE`（允许 `.` `:`），
+  条目名仍用严格的 `NAME_RE`。成员行显示名走 `shortNameOf(name)`，**不要**再用
+  `entry.name.slice(prefix.length + 1)`（组键是主机时会切出乱码）。
+  背景：纯名字前缀分组会把同一厂商拆成多张卡——`mcp-law-agg` 落进「mcp 系列」，`law_recognition`
+  这类无连字符的名字各自成组，15 个北大服务被拆成 5~6 张卡；改按端点主机后同网关服务天然同组。
+  另注：主机组没有"组前缀"可复制，`⋯ → 复制调用前缀` 改为逐条列出成员的工具前缀（每行一个）。
 - **档位语义（写盘即热生效）**：`eager` = 插件启动自动连接 / 运行时改 eager 立即后台连接；
   `on-demand` = 仅写盘，点连接（UI 或等待重启）再连；`disabled` = 立即断开该服务。
 - **工具定义对象**（裸对象，勿用动态 harness.defineTool）：`{ name, description, parameters: JSON Schema,
@@ -86,6 +104,13 @@ node <本包路径>/client/render-smoke.mjs
 抽取 `normalizeHost` / `hostNameOf` / `isLoopbackHost` / `sameOrigin` 真实实现，覆盖 19 个请求头形状
 （同源放行、跨站拒绝、无 Origin 回环放行、外网 Host 拒绝、IPv6 括号等）。
 
+导入去重回归测试（无 React 依赖，直接跑）：`node client/import-dedupe-smoke.mjs`——同样从 lib/index.js
+**抽取真实的 `createHandlers`**（含 `importText` / `save` / `list` 与其依赖的归一化、`endpointSignature`、
+读写函数；抽取器会跳过 `async` 前缀并按括号配平形参表）跑临时注册表，覆盖 25 项：同名更新、换名字同端点判重、
+headers/env 键大小写、同端点多 token 允许、同名改 url 后签名索引跟随、同批 JSON 内部去重、stdio 与 error 分支、
+以及 `setGroupTitle` 组键（主机名）校验与清空语义。
+新增导入语义时**同步改实现与这个测试**，不要复制一份逻辑到测试里。
+
 本地安装到 profile 测试（file: 依赖要 remove+add 才刷新）：
 
 ```bash
@@ -101,10 +126,14 @@ pnpm add "file:<本包绝对路径>"
 （运行中会话从新 step 起可见）；断开后工具从新会话工具集消失；重启 DSH 后 eager 项自动重连。
 
 UI 验证点（v0.4.0 起）：顶栏三个按钮与搜索框在同一行且不换行错位；分组卡的 `⋯` 菜单 portal 到 body（不被裁剪）；
-导入弹层的 textarea 自动聚焦、粘贴后"一键导入"给出逐条新增/更新/失败结果；删除走弹层确认；
+导入弹层的 textarea 自动聚焦、粘贴后"一键导入"给出逐条新增/更新/失败结果（v0.4.3 起还会单列"跳过重复"
+并指回已有条目名，标题形如"导入结果：新增 1 · 更新 0 · 跳过重复 2"）；删除走弹层确认；
 成功提示出现在窗口顶部居中并自动淡出；明暗两种主题下颜色都取自 `--dsw-alias-*`（不出现写死颜色）。
 组展开（v0.4.1 起）：**打开面板时所有组一律默认收起**（单成员组同样收起；改 `groupIsOpen` 的默认分支即可），
 点组头只翻转该组，"全部展开"后收起单组不会连带收起其余组——纯函数 `groupIsOpen` / `toggleGroupOpen` 有冒烟覆盖。
+分组（v0.5.0 起）：**同一个 url 主机的服务必须出现在同一张卡里**，与名字无关（改分组规则只动
+`groupKeyOf` / `groupTitle` / `shortNameOf` 这三个纯函数，冒烟测试里有对应断言）；组摘要行首位显示的是
+**组键**（主机名），据此可一眼看出为什么这几条被归在一起；`⋯ → 复制调用前缀` 在主机组下逐行给出成员前缀。
 客户端是普通 fetch bundle，改完 `client/client.js` 后**刷新页面**即可生效（client-plugin 热更新仅在
 `pnpm run dev:web` 同时运行时免刷新）。
 
@@ -120,11 +149,18 @@ UI 验证点（v0.4.0 起）：顶栏三个按钮与搜索框在同一行且不�
 ## 已知边界 / Ideas / 待完善
 
 - [ ] 连接是"一次性"的：注册表改动（url/headers）后需先断开再连接才生效；导入动作不改已连接条目的端点。
+- [ ] v0.4.3 的去重只拦**新的导入**，不自动清理历史遗留的重复端点条目（旧数据仍会连两遍）：
+  需要人工在面板里删掉多余那条，或对 `registry.json` 按 `url + headers` 自建一份去重脚本后再导入。
+  本机 2026-10-10 已按此方式清掉 9 条（备份：`registry.json.bak-20261010-before-dedupe`）。
 - [ ] 工具注册在 profile 级 → 所有新会话可见；如需"仅特定会话可用"需加 scope 逻辑（当前有意不做）。
 - [ ] 断线重连策略未实现（SDK 连接失败即置 error，需手动重连；可加 reconnect 逻辑）。
 - [ ] 组默认档位 + 个别行锁定持久语义（groups.json 元数据）；"一键拉齐"按钮。
 - [ ] 工具级黑名单（单工具禁用，联动 `disabledTools` 字段）。
-- [ ] 自定义分组名（非前缀规则）；组折叠状态持久化（当前为会话内记忆，重启还原为折叠）。
+- [ ] 组折叠状态持久化（当前为会话内记忆，重启还原为折叠）。
+- [ ] `groups.json` 里会残留 v0.4.x 按名字前缀存的组名键（本机 `yuandian`）：v0.5.0 只在没有主机键
+  自定义名时回退使用，不会自动清理/迁移；按"主机键"重命名一次即可落到新键。
+- [ ] 主机相同但确实是两个不同厂商（同域名下多租户）时会被并成一组：可先手动重命名组，或后续给
+  `groups.json` 加显式的 "键 → 成员" 规则。
 - [ ] 文案未国际化：面板文案硬编码中文，产品设置页走 `ctx.locale`；要对齐需接 locale seat（当前有意不做）。
 - [ ] 弹层与设置面板都监听 document Escape（产品 Modal 的既有行为）：在导入/确认弹层按 Esc 会连设置面板一起关。
 - [x] 从注册表导出 mcpServers JSON（反向导出，方便换机器）——v0.3.0 顶栏"导出"按钮。
